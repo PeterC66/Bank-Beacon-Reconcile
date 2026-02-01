@@ -519,6 +519,7 @@ class ReconciliationGUI:
 
         # Queue the change (will be applied when moving forward or saving)
         self.queued_changes[match.id] = MatchStatus.CONFIRMED
+        self._auto_save()
         self._update_display()
 
         # Auto-advance to next
@@ -532,6 +533,7 @@ class ReconciliationGUI:
 
         match = self.suggestions[self.current_index]
         self.queued_changes[match.id] = MatchStatus.REJECTED
+        self._auto_save()
         self._update_display()
 
         # Auto-advance
@@ -545,11 +547,17 @@ class ReconciliationGUI:
 
         match = self.suggestions[self.current_index]
         self.queued_changes[match.id] = MatchStatus.SKIPPED
+        self._auto_save()
         self._update_display()
 
         # Auto-advance
         if self.current_index < len(self.suggestions) - 1:
             self._on_next()
+
+    def _auto_save(self):
+        """Auto-save progress without showing a message."""
+        self._apply_queued_changes()
+        self.system.save_state()
 
     def _apply_queued_changes(self):
         """Apply all queued status changes."""
@@ -604,6 +612,13 @@ def main():
         pass
 
     app = ReconciliationGUI(root)
+
+    # Save on window close
+    def on_closing():
+        app._auto_save()
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
 
 
