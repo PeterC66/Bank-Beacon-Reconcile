@@ -65,10 +65,11 @@ class ReconciliationGUI:
                 f"Please ensure both files exist and have the correct format."
             )
 
-        self.suggestions = self.system.generate_suggestions()
+        # Generate suggestions with progress dialog
+        self.suggestions = self._generate_with_progress()
 
-        # Current match index
-        self.current_index = 0
+        # Current match index - start at first pending match
+        self.current_index = self._find_first_pending()
 
         # Queued changes (for edits made when navigating back)
         self.queued_changes = {}  # match_id -> new_status
@@ -80,12 +81,65 @@ class ReconciliationGUI:
 
         # Show summary after GUI loads
         if bank_count > 0 and beacon_count > 0:
+            confirmed = len([m for m in self.suggestions if m.status == MatchStatus.CONFIRMED])
+            pending = len([m for m in self.suggestions if m.status == MatchStatus.PENDING])
             self.master.after(100, lambda: messagebox.showinfo(
                 "Data Loaded",
                 f"Loaded {bank_count} bank transactions\n"
                 f"Loaded {beacon_count} beacon entries\n"
-                f"Generated {len(self.suggestions)} match suggestions"
+                f"Generated {len(self.suggestions)} match suggestions\n\n"
+                f"Auto-confirmed: {confirmed}\n"
+                f"Pending review: {pending}"
             ))
+
+    def _generate_with_progress(self):
+        """Generate suggestions with a progress dialog."""
+        bank_count = len(self.system.bank_transactions)
+
+        # For small datasets, skip progress dialog
+        if bank_count < 50:
+            return self.system.generate_suggestions()
+
+        # Create progress dialog
+        progress_window = tk.Toplevel(self.master)
+        progress_window.title("Generating Matches")
+        progress_window.geometry("400x120")
+        progress_window.transient(self.master)
+        progress_window.grab_set()
+
+        # Center the dialog
+        progress_window.update_idletasks()
+        x = self.master.winfo_x() + (self.master.winfo_width() - 400) // 2
+        y = self.master.winfo_y() + (self.master.winfo_height() - 120) // 2
+        progress_window.geometry(f"+{x}+{y}")
+
+        ttk.Label(progress_window, text="Processing transactions...",
+                  font=('Segoe UI', 11)).pack(pady=(15, 5))
+
+        progress_label = ttk.Label(progress_window, text="Initializing...")
+        progress_label.pack(pady=5)
+
+        progress_bar = ttk.Progressbar(progress_window, length=350, mode='determinate')
+        progress_bar.pack(pady=10)
+
+        def update_progress(current, total, message):
+            progress_bar['maximum'] = total
+            progress_bar['value'] = current
+            progress_label.config(text=f"[{current}/{total}] {message[:40]}")
+            progress_window.update()
+
+        # Generate suggestions
+        suggestions = self.system.generate_suggestions(progress_callback=update_progress)
+
+        progress_window.destroy()
+        return suggestions
+
+    def _find_first_pending(self):
+        """Find the index of the first pending match."""
+        for i, match in enumerate(self.suggestions):
+            if match.status == MatchStatus.PENDING:
+                return i
+        return 0
 
     def _setup_styles(self):
         """Configure ttk styles."""

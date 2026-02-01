@@ -4,10 +4,12 @@ Core matching logic for reconciling bank transactions with accounting entries.
 
 Features:
 - 1-to-1 and 1-to-2 matching
-- Common amount weighting (£13 and £9.50)
+- Common amount weighting (£13, £9.50, £6.50)
 - Date proximity matching (within 7 days)
 - Name similarity matching (surname + initial)
 - Beacon exclusivity (each Beacon matches only one Bank transaction)
+- Auto-confirmation of high-confidence matches
+- Optimized for large datasets with progress reporting
 """
 
 import csv
@@ -15,9 +17,9 @@ import json
 import os
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field, asdict
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple, Dict, Callable
 from difflib import SequenceMatcher
-from itertools import combinations
+from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
 
@@ -143,7 +145,11 @@ class ReconciliationSystem:
     """Main reconciliation system for matching bank and beacon transactions."""
 
     # Common amounts that are weak matching signals
-    COMMON_AMOUNTS = [Decimal('13.00'), Decimal('9.50')]
+    COMMON_AMOUNTS = [Decimal('13.00'), Decimal('9.50'), Decimal('6.50')]
+
+    # Auto-confirm thresholds
+    AUTO_CONFIRM_COMMON_THRESHOLD = 0.90  # >90% for common amounts
+    AUTO_CONFIRM_OTHER_THRESHOLD = 0.80   # >80% for other amounts
 
     # Date tolerance in days
     DATE_TOLERANCE_DAYS = 7
@@ -170,6 +176,13 @@ class ReconciliationSystem:
 
         # Track which beacon entries are already matched
         self.matched_beacon_ids: set = set()
+
+        # Index for fast lookups (built during generate_suggestions)
+        self._beacon_by_amount: Dict[Decimal, List[BeaconEntry]] = {}
+        self._beacon_amounts: set = set()
+
+        # Progress callback
+        self.progress_callback: Optional[Callable[[int, int, str], None]] = None
 
     def load_data(self):
         """Load transactions from CSV files."""
@@ -272,8 +285,23 @@ class ReconciliationSystem:
         with open(self.state_file, 'w') as f:
             json.dump(state, f, indent=2)
 
-    def generate_suggestions(self) -> List[MatchSuggestion]:
+    def _build_beacon_index(self, available_beacon: List[BeaconEntry]):
+        """Build index of beacon entries by amount for fast lookup."""
+        self._beacon_by_amount = defaultdict(list)
+        self._beacon_amounts = set()
+
+        for beacon in available_beacon:
+            self._beacon_by_amount[beacon.amount].append(beacon)
+            self._beacon_amounts.add(beacon.amount)
+
+    def _report_progress(self, current: int, total: int, message: str):
+        """Report progress if callback is set."""
+        if self.progress_callback:
+            self.progress_callback(current, total, message)
+
+    def generate_suggestions(self, progress_callback: Callable[[int, int, str], None] = None) -> List[MatchSuggestion]:
         """Generate match suggestions for all unmatched bank transactions."""
+        self.progress_callback = progress_callback
         self.match_suggestions = []
         suggestion_id = 0
 
@@ -286,12 +314,24 @@ class ReconciliationSystem:
         available_beacon = [e for e in self.beacon_entries
                           if e.id not in self.matched_beacon_ids]
 
-        for bank_txn in unmatched_bank:
-            # Find 1-to-1 matches
-            one_to_one = self._find_one_to_one_matches(bank_txn, available_beacon)
+        total_bank = len(unmatched_bank)
 
-            # Find 1-to-2 matches
-            one_to_two = self._find_one_to_two_matches(bank_txn, available_beacon)
+        if total_bank == 0:
+            return self.match_suggestions
+
+        # Build index for fast lookups
+        self._report_progress(0, total_bank, "Building index...")
+        self._build_beacon_index(available_beacon)
+
+        # Process each bank transaction
+        for idx, bank_txn in enumerate(unmatched_bank):
+            self._report_progress(idx + 1, total_bank, f"Processing {bank_txn.description[:20]}...")
+
+            # Find 1-to-1 matches (optimized)
+            one_to_one = self._find_one_to_one_matches_fast(bank_txn)
+
+            # Find 1-to-2 matches (optimized)
+            one_to_two = self._find_one_to_two_matches_fast(bank_txn)
 
             # Combine and sort by confidence
             all_matches = one_to_one + one_to_two
@@ -315,19 +355,22 @@ class ReconciliationSystem:
                 self.match_suggestions.append(suggestion)
                 suggestion_id += 1
 
+        # Auto-confirm high-confidence matches
+        self._report_progress(total_bank, total_bank, "Auto-confirming high-confidence matches...")
+        self._auto_confirm_matches()
+
         return self.match_suggestions
 
-    def _find_one_to_one_matches(self, bank_txn: BankTransaction,
-                                  available_beacon: List[BeaconEntry]) -> List[MatchSuggestion]:
-        """Find 1-to-1 matches for a bank transaction."""
+    def _find_one_to_one_matches_fast(self, bank_txn: BankTransaction) -> List[MatchSuggestion]:
+        """Find 1-to-1 matches using indexed lookup."""
         matches = []
 
-        for beacon in available_beacon:
-            # Exact amount match required
-            if beacon.amount != bank_txn.amount:
-                continue
+        # Only look at beacon entries with matching amount
+        if bank_txn.amount not in self._beacon_by_amount:
+            return matches
 
-            # Calculate scores
+        for beacon in self._beacon_by_amount[bank_txn.amount]:
+            # Calculate date score first (fast rejection)
             date_score = self._calculate_date_score(bank_txn.date, beacon.date)
             if date_score == 0:
                 continue  # Outside date tolerance
@@ -354,64 +397,134 @@ class ReconciliationSystem:
 
         return matches
 
-    def _find_one_to_two_matches(self, bank_txn: BankTransaction,
-                                  available_beacon: List[BeaconEntry]) -> List[MatchSuggestion]:
-        """Find 1-to-2 matches for a bank transaction."""
+    def _find_one_to_two_matches_fast(self, bank_txn: BankTransaction) -> List[MatchSuggestion]:
+        """Find 1-to-2 matches using indexed lookup (optimized)."""
         matches = []
+        bank_amount = bank_txn.amount
+        bank_date = bank_txn.date
 
-        # Try all combinations of 2 beacon entries
-        for beacon1, beacon2 in combinations(available_beacon, 2):
-            # Check if amounts sum to bank amount exactly
-            combined_amount = beacon1.amount + beacon2.amount
-            if combined_amount != bank_txn.amount:
+        # For each unique amount in beacon entries
+        checked_pairs = set()
+
+        for amount1 in self._beacon_amounts:
+            amount2 = bank_amount - amount1
+
+            # Skip if amount2 doesn't exist or if we've already checked this pair
+            if amount2 not in self._beacon_amounts:
                 continue
 
-            # Calculate average date score
-            date_score1 = self._calculate_date_score(bank_txn.date, beacon1.date)
-            date_score2 = self._calculate_date_score(bank_txn.date, beacon2.date)
+            pair_key = tuple(sorted([amount1, amount2]))
+            if pair_key in checked_pairs:
+                continue
+            checked_pairs.add(pair_key)
 
-            if date_score1 == 0 or date_score2 == 0:
-                continue  # One entry outside date tolerance
+            # Get beacons with these amounts
+            beacons1 = self._beacon_by_amount[amount1]
+            beacons2 = self._beacon_by_amount[amount2]
 
-            date_score = (date_score1 + date_score2) / 2
+            # If same amount, need to handle differently
+            if amount1 == amount2:
+                # Pairs from same list
+                for i, b1 in enumerate(beacons1):
+                    # Check date early for b1
+                    date_score1 = self._calculate_date_score(bank_date, b1.date)
+                    if date_score1 == 0:
+                        continue
 
-            # Calculate name scores
-            name_score1 = self._calculate_name_score(bank_txn.description, beacon1.payee)
-            name_score2 = self._calculate_name_score(bank_txn.description, beacon2.payee)
-            name_score = (name_score1 + name_score2) / 2
+                    for b2 in beacons1[i+1:]:
+                        # Check date early for b2
+                        date_score2 = self._calculate_date_score(bank_date, b2.date)
+                        if date_score2 == 0:
+                            continue
 
-            # For 1-to-2 matches, check if individual amounts are common
-            is_common1 = beacon1.amount in self.COMMON_AMOUNTS
-            is_common2 = beacon2.amount in self.COMMON_AMOUNTS
-
-            # Calculate amount score based on whether amounts are common
-            if is_common1 and is_common2:
-                amount_score = 0.3  # Both common, weak signal
-            elif is_common1 or is_common2:
-                amount_score = 0.6  # One common
+                        match = self._create_two_match(bank_txn, b1, b2, date_score1, date_score2)
+                        if match:
+                            matches.append(match)
             else:
-                amount_score = 1.0  # Neither common
+                # Pairs from different lists
+                for b1 in beacons1:
+                    date_score1 = self._calculate_date_score(bank_date, b1.date)
+                    if date_score1 == 0:
+                        continue
 
-            # Calculate overall confidence
-            # 1-to-2 matches get a slight penalty since they're more complex
-            base_confidence = self._calculate_confidence(
-                amount_score, date_score, name_score, bank_txn.amount
-            )
-            confidence = base_confidence * 0.9  # 10% penalty for complexity
+                    for b2 in beacons2:
+                        date_score2 = self._calculate_date_score(bank_date, b2.date)
+                        if date_score2 == 0:
+                            continue
 
-            match = MatchSuggestion(
-                id="",
-                bank_transaction=bank_txn,
-                beacon_entries=[beacon1, beacon2],
-                confidence_score=confidence,
-                match_type="1-to-2",
-                amount_score=amount_score,
-                date_score=date_score,
-                name_score=name_score
-            )
-            matches.append(match)
+                        match = self._create_two_match(bank_txn, b1, b2, date_score1, date_score2)
+                        if match:
+                            matches.append(match)
 
         return matches
+
+    def _create_two_match(self, bank_txn: BankTransaction,
+                          beacon1: BeaconEntry, beacon2: BeaconEntry,
+                          date_score1: float, date_score2: float) -> Optional[MatchSuggestion]:
+        """Create a 1-to-2 match suggestion."""
+        date_score = (date_score1 + date_score2) / 2
+
+        # Calculate name scores
+        name_score1 = self._calculate_name_score(bank_txn.description, beacon1.payee)
+        name_score2 = self._calculate_name_score(bank_txn.description, beacon2.payee)
+        name_score = (name_score1 + name_score2) / 2
+
+        # Check if individual amounts are common
+        is_common1 = beacon1.amount in self.COMMON_AMOUNTS
+        is_common2 = beacon2.amount in self.COMMON_AMOUNTS
+
+        # Calculate amount score based on whether amounts are common
+        if is_common1 and is_common2:
+            amount_score = 0.3  # Both common, weak signal
+        elif is_common1 or is_common2:
+            amount_score = 0.6  # One common
+        else:
+            amount_score = 1.0  # Neither common
+
+        # Calculate overall confidence
+        # 1-to-2 matches get a slight penalty since they're more complex
+        base_confidence = self._calculate_confidence(
+            amount_score, date_score, name_score, bank_txn.amount
+        )
+        confidence = base_confidence * 0.9  # 10% penalty for complexity
+
+        return MatchSuggestion(
+            id="",
+            bank_transaction=bank_txn,
+            beacon_entries=[beacon1, beacon2],
+            confidence_score=confidence,
+            match_type="1-to-2",
+            amount_score=amount_score,
+            date_score=date_score,
+            name_score=name_score
+        )
+
+    def _auto_confirm_matches(self):
+        """Auto-confirm matches that exceed confidence thresholds."""
+        auto_confirmed = 0
+
+        for match in self.match_suggestions:
+            if match.status != MatchStatus.PENDING:
+                continue
+            if not match.beacon_entries:
+                continue
+
+            # Check if amount is common
+            is_common = match.bank_transaction.amount in self.COMMON_AMOUNTS
+
+            # Determine threshold
+            if is_common:
+                threshold = self.AUTO_CONFIRM_COMMON_THRESHOLD
+            else:
+                threshold = self.AUTO_CONFIRM_OTHER_THRESHOLD
+
+            # Auto-confirm if above threshold
+            if match.confidence_score > threshold:
+                self.confirm_match(match)
+                auto_confirmed += 1
+
+        if auto_confirmed > 0:
+            print(f"Auto-confirmed {auto_confirmed} high-confidence matches")
 
     def _calculate_date_score(self, bank_date: datetime,
                                beacon_date: datetime) -> float:
@@ -557,8 +670,11 @@ class ReconciliationSystem:
             'unmatched_beacon': total_beacon - matched_beacon
         }
 
-    def export_results(self, output_file: str = "reconciliation_results.csv"):
+    def export_results(self, output_file: str = None):
         """Export reconciliation results to CSV."""
+        if output_file is None:
+            output_file = os.path.join(self.base_dir, "reconciliation_results.csv")
+
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
 
@@ -600,17 +716,31 @@ def main():
     print(f"Loaded {len(system.bank_transactions)} bank transactions")
     print(f"Loaded {len(system.beacon_entries)} beacon entries")
 
-    suggestions = system.generate_suggestions()
+    def progress(current, total, message):
+        print(f"\r[{current}/{total}] {message}".ljust(60), end='', flush=True)
+
+    suggestions = system.generate_suggestions(progress_callback=progress)
+    print()  # New line after progress
     print(f"Generated {len(suggestions)} match suggestions")
 
-    # Print suggestions
-    for match in suggestions:
-        bank = match.bank_transaction
-        print(f"\n{match.id}: {match.match_type} (confidence: {match.confidence_score:.2f})")
-        print(f"  Bank: {bank.date.strftime('%d-%b-%y')} - {bank.description} - £{bank.amount}")
+    # Count by status
+    confirmed = len([m for m in suggestions if m.status == MatchStatus.CONFIRMED])
+    pending = len([m for m in suggestions if m.status == MatchStatus.PENDING])
 
-        for i, beacon in enumerate(match.beacon_entries, 1):
-            print(f"  Beacon {i}: {beacon.date.strftime('%d/%m/%Y')} - {beacon.payee} - £{beacon.amount}")
+    print(f"  Auto-confirmed: {confirmed}")
+    print(f"  Pending review: {pending}")
+
+    # Print first few pending suggestions
+    pending_suggestions = [m for m in suggestions if m.status == MatchStatus.PENDING][:5]
+    if pending_suggestions:
+        print("\nFirst pending matches:")
+        for match in pending_suggestions:
+            bank = match.bank_transaction
+            print(f"\n{match.id}: {match.match_type} (confidence: {match.confidence_score:.2f})")
+            print(f"  Bank: {bank.date.strftime('%d-%b-%y')} - {bank.description} - £{bank.amount}")
+
+            for i, beacon in enumerate(match.beacon_entries, 1):
+                print(f"  Beacon {i}: {beacon.date.strftime('%d/%m/%Y')} - {beacon.payee} - £{beacon.amount}")
 
     # Print statistics
     stats = system.get_statistics()
