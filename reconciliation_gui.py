@@ -48,6 +48,21 @@ class ReconciliationGUI:
         # Initialize reconciliation system
         self.system = ReconciliationSystem()
         self.system.load_data()
+
+        # Show loading summary
+        bank_count = len(self.system.bank_transactions)
+        beacon_count = len(self.system.beacon_entries)
+
+        if bank_count == 0 or beacon_count == 0:
+            messagebox.showwarning(
+                "Loading Issue",
+                f"Loaded {bank_count} bank transactions and {beacon_count} beacon entries.\n\n"
+                f"Expected files in current directory:\n"
+                f"- Bank_Transactions.csv\n"
+                f"- Beacon_Entries.csv\n\n"
+                f"Please ensure both files exist and have the correct format."
+            )
+
         self.suggestions = self.system.generate_suggestions()
 
         # Current match index
@@ -60,6 +75,15 @@ class ReconciliationGUI:
         self._setup_styles()
         self._create_widgets()
         self._update_display()
+
+        # Show summary after GUI loads
+        if bank_count > 0 and beacon_count > 0:
+            self.master.after(100, lambda: messagebox.showinfo(
+                "Data Loaded",
+                f"Loaded {bank_count} bank transactions\n"
+                f"Loaded {beacon_count} beacon entries\n"
+                f"Generated {len(self.suggestions)} match suggestions"
+            ))
 
     def _setup_styles(self):
         """Configure ttk styles."""
