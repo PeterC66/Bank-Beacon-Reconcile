@@ -57,9 +57,11 @@ class ReconciliationGUI:
             messagebox.showwarning(
                 "Loading Issue",
                 f"Loaded {bank_count} bank transactions and {beacon_count} beacon entries.\n\n"
-                f"Expected files in current directory:\n"
-                f"- Bank_Transactions.csv\n"
-                f"- Beacon_Entries.csv\n\n"
+                f"Looking for files in:\n"
+                f"{self.system.base_dir}\n\n"
+                f"Expected files:\n"
+                f"- {self.system.bank_file}\n"
+                f"- {self.system.beacon_file}\n\n"
                 f"Please ensure both files exist and have the correct format."
             )
 

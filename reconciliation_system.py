@@ -151,10 +151,17 @@ class ReconciliationSystem:
     def __init__(self,
                  bank_file: str = "Bank_Transactions.csv",
                  beacon_file: str = "Beacon_Entries.csv",
-                 state_file: str = "reconciliation_state.json"):
-        self.bank_file = bank_file
-        self.beacon_file = beacon_file
-        self.state_file = state_file
+                 state_file: str = "reconciliation_state.json",
+                 base_dir: str = None):
+        # Use script directory as base if not specified
+        if base_dir is None:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.base_dir = base_dir
+
+        # Resolve file paths relative to base directory
+        self.bank_file = os.path.join(base_dir, bank_file) if not os.path.isabs(bank_file) else bank_file
+        self.beacon_file = os.path.join(base_dir, beacon_file) if not os.path.isabs(beacon_file) else beacon_file
+        self.state_file = os.path.join(base_dir, state_file) if not os.path.isabs(state_file) else state_file
 
         self.bank_transactions: List[BankTransaction] = []
         self.beacon_entries: List[BeaconEntry] = []
