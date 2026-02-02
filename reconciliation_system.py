@@ -565,14 +565,44 @@ class ReconciliationSystem:
 
     def _calculate_date_score(self, bank_date: datetime,
                                beacon_date: datetime) -> float:
-        """Calculate date proximity score (0-1)."""
-        days_diff = abs((bank_date - beacon_date).days)
+        """Calculate date proximity score (0-1).
 
-        if days_diff > self.DATE_TOLERANCE_DAYS:
-            return 0.0
+        Beacon is typically entered AFTER bank transaction clears.
+        - Beacon after bank: normal, allow up to 6 weeks (April renewal catchup)
+        - Beacon before bank: unusual, only allow 1-2 days
+        """
+        # Positive = beacon after bank (normal), negative = beacon before bank (unusual)
+        days_diff = (beacon_date - bank_date).days
 
-        # Linear decay: same day = 1.0, 7 days = ~0.14
-        return 1.0 - (days_diff / (self.DATE_TOLERANCE_DAYS + 1))
+        if days_diff >= 0:
+            # Beacon AFTER bank (normal case)
+            if days_diff == 0:
+                return 1.0    # Same day
+            elif days_diff == 1:
+                return 0.95   # Next day
+            elif days_diff == 2:
+                return 0.90
+            elif days_diff == 3:
+                return 0.80
+            elif days_diff <= 7:
+                return 0.60   # Within 1 week
+            elif days_diff <= 14:
+                return 0.40   # Within 2 weeks
+            elif days_diff <= 28:
+                return 0.25   # Within 4 weeks
+            elif days_diff <= 42:
+                return 0.15   # Within 6 weeks (April renewal catchup)
+            else:
+                return 0.0    # Too late, reject
+        else:
+            # Beacon BEFORE bank (unusual case)
+            abs_diff = abs(days_diff)
+            if abs_diff == 1:
+                return 0.50   # 1 day before - might be timing issue
+            elif abs_diff == 2:
+                return 0.25   # 2 days before
+            else:
+                return 0.0    # 3+ days before - reject
 
     def _calculate_name_score(self, bank_description: str,
                                beacon_payee: str) -> float:
