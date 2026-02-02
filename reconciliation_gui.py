@@ -177,19 +177,43 @@ class ReconciliationGUI:
         stats_frame = ttk.LabelFrame(parent, text="Reconciliation Progress", padding="10")
         stats_frame.pack(fill=tk.X, pady=(0, 10))
 
+        # Top row: Progress info and stats
+        top_row = ttk.Frame(stats_frame)
+        top_row.pack(fill=tk.X)
+
         # Progress info
-        self.progress_label = ttk.Label(stats_frame, text="Match 0 of 0")
+        self.progress_label = ttk.Label(top_row, text="Match 0 of 0")
         self.progress_label.pack(side=tk.LEFT)
 
         # Stats summary
-        self.stats_label = ttk.Label(stats_frame, text="")
+        self.stats_label = ttk.Label(top_row, text="")
         self.stats_label.pack(side=tk.RIGHT)
 
         # Progress bar
         self.progress_bar = ttk.Progressbar(
-            stats_frame, mode='determinate', length=300
+            top_row, mode='determinate', length=300
         )
         self.progress_bar.pack(side=tk.LEFT, padx=20)
+
+        # Bottom row: Search/filter
+        search_row = ttk.Frame(stats_frame)
+        search_row.pack(fill=tk.X, pady=(10, 0))
+
+        ttk.Label(search_row, text="Search:").pack(side=tk.LEFT)
+        self.search_entry = ttk.Entry(search_row, width=30)
+        self.search_entry.pack(side=tk.LEFT, padx=5)
+        self.search_entry.bind('<Return>', self._on_search)
+
+        ttk.Button(search_row, text="Find", command=self._on_search).pack(side=tk.LEFT, padx=2)
+        ttk.Button(search_row, text="Find Next", command=self._on_search_next).pack(side=tk.LEFT, padx=2)
+        ttk.Button(search_row, text="Clear", command=self._on_search_clear).pack(side=tk.LEFT, padx=2)
+
+        self.search_result_label = ttk.Label(search_row, text="", foreground='gray')
+        self.search_result_label.pack(side=tk.LEFT, padx=10)
+
+        # Track search state
+        self.search_matches = []
+        self.search_index = 0
 
     def _create_transaction_section(self, parent):
         """Create transaction display section with Bank on left, Beacon on right."""
@@ -232,26 +256,33 @@ class ReconciliationGUI:
         details_frame = ttk.Frame(bank_frame)
         details_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Date
-        ttk.Label(details_frame, text="Date:", style='Header.TLabel').grid(
+        # Bank ID
+        ttk.Label(details_frame, text="ID:", style='Header.TLabel').grid(
             row=0, column=0, sticky='w', pady=5
         )
+        self.bank_id_label = ttk.Label(details_frame, text="", foreground='gray')
+        self.bank_id_label.grid(row=0, column=1, sticky='w', padx=10, pady=5)
+
+        # Date
+        ttk.Label(details_frame, text="Date:", style='Header.TLabel').grid(
+            row=1, column=0, sticky='w', pady=5
+        )
         self.bank_date_label = ttk.Label(details_frame, text="")
-        self.bank_date_label.grid(row=0, column=1, sticky='w', padx=10, pady=5)
+        self.bank_date_label.grid(row=1, column=1, sticky='w', padx=10, pady=5)
 
         # Type
         ttk.Label(details_frame, text="Type:", style='Header.TLabel').grid(
-            row=1, column=0, sticky='w', pady=5
+            row=2, column=0, sticky='w', pady=5
         )
         self.bank_type_label = ttk.Label(details_frame, text="")
-        self.bank_type_label.grid(row=1, column=1, sticky='w', padx=10, pady=5)
+        self.bank_type_label.grid(row=2, column=1, sticky='w', padx=10, pady=5)
 
         # Description
         ttk.Label(details_frame, text="Description:", style='Header.TLabel').grid(
-            row=2, column=0, sticky='w', pady=5
+            row=3, column=0, sticky='w', pady=5
         )
         self.bank_desc_label = ttk.Label(details_frame, text="", wraplength=350, style='Value.TLabel')
-        self.bank_desc_label.grid(row=2, column=1, sticky='w', padx=10, pady=5)
+        self.bank_desc_label.grid(row=3, column=1, sticky='w', padx=10, pady=5)
 
         # Amount (prominent)
         amount_frame = ttk.Frame(bank_frame)
@@ -487,6 +518,7 @@ class ReconciliationGUI:
 
         # Update bank transaction details
         bank = match.bank_transaction
+        self.bank_id_label.config(text=bank.id)
         self.bank_date_label.config(text=bank.date.strftime('%d-%b-%Y'))
         self.bank_type_label.config(text=bank.type)
         self.bank_desc_label.config(text=bank.description)
@@ -695,6 +727,55 @@ class ReconciliationGUI:
             "Refreshed",
             f"Generated {len(self.suggestions)} new match suggestions"
         )
+
+    def _on_search(self, event=None):
+        """Search for matches by description or payee."""
+        search_term = self.search_entry.get().strip().lower()
+        if not search_term:
+            self.search_result_label.config(text="Enter search term")
+            return
+
+        self.search_matches = []
+        for i, match in enumerate(self.suggestions):
+            # Search in bank description
+            if search_term in match.bank_transaction.description.lower():
+                self.search_matches.append(i)
+                continue
+            # Search in beacon payees
+            for beacon in match.beacon_entries:
+                if search_term in beacon.payee.lower():
+                    self.search_matches.append(i)
+                    break
+
+        if self.search_matches:
+            self.search_index = 0
+            self.current_index = self.search_matches[0]
+            self._update_display()
+            self.search_result_label.config(
+                text=f"Found {len(self.search_matches)} matches (1/{len(self.search_matches)})"
+            )
+        else:
+            self.search_result_label.config(text="No matches found")
+
+    def _on_search_next(self):
+        """Go to next search result."""
+        if not self.search_matches:
+            self.search_result_label.config(text="No search results")
+            return
+
+        self.search_index = (self.search_index + 1) % len(self.search_matches)
+        self.current_index = self.search_matches[self.search_index]
+        self._update_display()
+        self.search_result_label.config(
+            text=f"Found {len(self.search_matches)} matches ({self.search_index + 1}/{len(self.search_matches)})"
+        )
+
+    def _on_search_clear(self):
+        """Clear search."""
+        self.search_entry.delete(0, tk.END)
+        self.search_matches = []
+        self.search_index = 0
+        self.search_result_label.config(text="")
 
 
 def main():

@@ -627,24 +627,50 @@ class ReconciliationSystem:
         return 0.0
 
     def _extract_name(self, description: str) -> str:
-        """Extract name from bank description (format: SURNAME I)."""
-        # Remove U3A references
+        """Extract name from bank description - handles multiple formats."""
         import re
-        clean_desc = re.sub(r'\bu3a\b', '', description, flags=re.IGNORECASE).strip()
+        # Remove U3A references (including U3A followed by numbers like U3A1679)
+        clean_desc = re.sub(r'\bu3a\d*\b', '', description, flags=re.IGNORECASE).strip()
+        # Remove extra whitespace
+        clean_desc = ' '.join(clean_desc.split())
 
         parts = clean_desc.upper().split()
-        if len(parts) >= 2:
-            # Assume format is "SURNAME INITIAL" or "SURNAME I PAYMENT"
-            surname = parts[0]
-            initial = parts[1][0] if len(parts[1]) == 1 else parts[1][:1]
+        if len(parts) < 2:
+            return clean_desc
+
+        # Filter out common non-name words
+        noise_words = {'PAYMENT', 'TRANSFER', 'CREDIT', 'DEBIT', 'REF', 'FT', 'TFR'}
+        name_parts = [p for p in parts if p not in noise_words and not p.isdigit()]
+
+        if len(name_parts) < 2:
+            return clean_desc
+
+        # Detect format: "SURNAME I" vs "FIRSTNAME SURNAME"
+        # If second word is a single letter, it's likely "SURNAME I" format
+        if len(name_parts[1]) == 1:
+            surname = name_parts[0]
+            initial = name_parts[1]
             return f"{surname} {initial}"
-        return clean_desc
+
+        # If first word could be a first name and second is longer, treat as "FIRSTNAME SURNAME"
+        # Take the last long word as surname (similar to _normalize_name)
+        potential_surnames = [p for p in name_parts if len(p) > 1]
+        if len(potential_surnames) >= 2:
+            # Assume format is "FIRSTNAME SURNAME [extra]"
+            surname = potential_surnames[1]  # Second long word is likely surname
+            initial = potential_surnames[0][0]  # First letter of first name
+            return f"{surname} {initial}"
+
+        # Fallback: first word surname, first letter of second word as initial
+        surname = name_parts[0]
+        initial = name_parts[1][0]
+        return f"{surname} {initial}"
 
     def _normalize_name(self, payee: str) -> str:
         """Normalize beacon payee name to SURNAME I format."""
         import re
-        # Remove U3A references and trailing member numbers
-        clean_payee = re.sub(r'\bu3a\b', '', payee, flags=re.IGNORECASE).strip()
+        # Remove U3A references (including U3A followed by numbers) and trailing member numbers
+        clean_payee = re.sub(r'\bu3a\d*\b', '', payee, flags=re.IGNORECASE).strip()
         clean_payee = re.sub(r'\s+\d+$', '', clean_payee).strip()
 
         parts = clean_payee.split()
@@ -713,6 +739,23 @@ class ReconciliationSystem:
 
         # Auto-reject any other pending matches that involve these beacon entries
         self._reject_matches_with_beacons(confirmed_beacon_ids, exclude_match=match)
+
+        # Auto-reject any other pending matches for this bank transaction
+        self._reject_matches_for_bank(match.bank_transaction.id, exclude_match=match)
+
+    def _reject_matches_for_bank(self, bank_id: str, exclude_match: MatchSuggestion = None):
+        """Reject all pending matches for the specified bank transaction."""
+        for suggestion in self.match_suggestions:
+            if suggestion == exclude_match:
+                continue
+            if suggestion.status != MatchStatus.PENDING:
+                continue
+
+            if suggestion.bank_transaction.id == bank_id:
+                suggestion.status = MatchStatus.REJECTED
+                self.rejected_bank_ids.add(bank_id)
+                if suggestion not in self.rejected_matches:
+                    self.rejected_matches.append(suggestion)
 
     def _reject_matches_with_beacons(self, beacon_ids: set, exclude_match: MatchSuggestion = None):
         """Reject all pending matches that involve any of the specified beacon entries."""
