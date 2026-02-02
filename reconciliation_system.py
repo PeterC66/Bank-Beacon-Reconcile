@@ -659,52 +659,68 @@ class ReconciliationSystem:
         return 0.0
 
     def _extract_name(self, description: str) -> str:
-        """Extract name from bank description - handles multiple formats."""
+        """Extract name from bank description - prioritizes reference name if present.
+
+        Bank description structure:
+        - Account name (who made payment): often "FIRSTNAME [MIDDLENAME] SURNAME"
+        - Reference (who payment is for): often "INITIAL SURNAME" or just membership number
+        - May include U3A and membership number (ignored)
+
+        Priority:
+        1. "INITIAL SURNAME" pattern indicates reference name - use this
+        2. Combined initials like "PA&JC" with surnames (joint payments)
+        3. Standard "FIRSTNAME SURNAME" pattern from account name
+        """
         import re
-        # Remove U3A references (including U3A followed by numbers like U3A1679)
+
+        # Remove U3A references (including U3A followed by numbers)
         clean_desc = re.sub(r'\bu3a\d*\b', '', description, flags=re.IGNORECASE).strip()
-        # Remove extra whitespace
+        # Remove pure numbers and patterns like 1786/1785 (membership numbers)
+        clean_desc = re.sub(r'\b\d+(/\d+)?\b', '', clean_desc).strip()
+        # Remove dashes and extra punctuation
+        clean_desc = re.sub(r'[-]', ' ', clean_desc)
         clean_desc = ' '.join(clean_desc.split())
 
         parts = clean_desc.upper().split()
-        if len(parts) < 2:
-            return clean_desc
 
-        # Filter out common non-name words and non-alphabetic strings
+        # Filter out common non-name words
         noise_words = {'PAYMENT', 'TRANSFER', 'CREDIT', 'DEBIT', 'REF', 'FT', 'TFR'}
-        # Only keep parts that are mostly alphabetic (allow & for initials like "PA&JC")
-        name_parts = [p for p in parts
-                      if p not in noise_words
-                      and not p.isdigit()
-                      and re.match(r'^[A-Z&]+$', p)]  # Only letters and &
 
-        if len(name_parts) < 1:
+        # Separate alphabetic-only words from combined initials (like PA&JC)
+        alpha_parts = [p for p in parts if re.match(r'^[A-Z]+$', p) and p not in noise_words]
+        combined_initials = [p for p in parts if re.match(r'^[A-Z&]+$', p) and '&' in p]
+
+        if not alpha_parts:
             return clean_desc
 
-        # Find potential surnames (words > 2 chars, excluding combined initials like "PA&JC")
-        potential_surnames = [p for p in name_parts if len(p) > 2 and '&' not in p]
+        # Priority 1: Look for "INITIAL SURNAME" pattern - indicates reference name
+        # This is the member the payment is for (not the account holder)
+        for i in range(len(alpha_parts) - 1):
+            if len(alpha_parts[i]) == 1 and len(alpha_parts[i+1]) > 2:
+                initial = alpha_parts[i]
+                surname = alpha_parts[i+1]
+                return f"{surname} {initial}"
 
-        if not potential_surnames:
-            return clean_desc
-
-        # Use the LAST surname found - in "PAMELA ELIZABETH L LEONARD", surname is last
-        surname = potential_surnames[-1]
-
-        # Find initials - single letters or combined like "PA&JC"
-        # Prefer single letter that appears before the surname
-        initial_parts = [p for p in name_parts if len(p) <= 2 or '&' in p]
-
-        # If no explicit initials, use first letter of the first name (first potential surname)
-        if initial_parts:
-            initial = initial_parts[0][0]
-        elif len(potential_surnames) > 1:
-            initial = potential_surnames[0][0]  # First letter of first name
-        else:
-            initial = ""
-
-        if initial:
+        # Priority 2: Combined initials like "PA&JC" with surnames (joint payments)
+        # Pattern: "SURNAME SURNAME PA&JC" for two people paying together
+        potential_surnames = [p for p in alpha_parts if len(p) > 2]
+        if combined_initials and potential_surnames:
+            surname = potential_surnames[0]  # First surname for joint payments
+            initial = combined_initials[0][0]  # First initial from "PA&JC"
             return f"{surname} {initial}"
-        return surname
+
+        # Priority 3: Standard "FIRSTNAME SURNAME [extra]" pattern
+        # This is the account holder name - use second word as surname
+        if len(potential_surnames) >= 2:
+            surname = potential_surnames[1]  # Second long word is typically surname
+            initial = potential_surnames[0][0]  # First letter of first name
+            return f"{surname} {initial}"
+
+        # Fallback: Single name word
+        if potential_surnames:
+            return potential_surnames[0]
+
+        return clean_desc
 
     def _normalize_name(self, payee: str) -> str:
         """Normalize beacon payee name to SURNAME I format."""
