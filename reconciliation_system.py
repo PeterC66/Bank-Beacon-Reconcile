@@ -602,14 +602,18 @@ class ReconciliationSystem:
 
         # Check if one surname contains the other (partial match)
         if bank_surname in beacon_surname or beacon_surname in bank_surname:
-            return 0.5
+            # Only if the contained part is substantial (at least 4 chars)
+            if min(len(bank_surname), len(beacon_surname)) >= 4:
+                return 0.5
 
-        # Use SequenceMatcher only for close matches
-        similarity = SequenceMatcher(None, bank_surname, beacon_surname).ratio()
-
-        # Only return meaningful score if similarity is high (typo tolerance)
-        if similarity >= 0.8:
-            return similarity * 0.8  # Cap at 0.8 for fuzzy matches
+        # Use SequenceMatcher only for typo tolerance in longer surnames
+        # Short surnames (5 chars or less) need exact match - one letter difference
+        # in "BARRY" vs "PARRY" is a completely different person
+        if len(bank_surname) >= 6 and len(beacon_surname) >= 6:
+            similarity = SequenceMatcher(None, bank_surname, beacon_surname).ratio()
+            # Require very high similarity (90%+) for fuzzy match
+            if similarity >= 0.9:
+                return similarity * 0.7  # Cap at ~0.7 for fuzzy matches
 
         # No meaningful match
         return 0.0
