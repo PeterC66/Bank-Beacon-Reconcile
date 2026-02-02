@@ -568,7 +568,7 @@ class ReconciliationSystem:
         """Calculate date proximity score (0-1).
 
         Beacon is typically entered AFTER bank transaction clears.
-        - Beacon after bank: normal, allow up to 6 weeks (April renewal catchup)
+        - Beacon after bank: normal, allow up to 9 weeks (April renewal catchup)
         - Beacon before bank: unusual, only allow 1-2 days
         """
         # Positive = beacon after bank (normal), negative = beacon before bank (unusual)
@@ -591,7 +591,9 @@ class ReconciliationSystem:
             elif days_diff <= 28:
                 return 0.25   # Within 4 weeks
             elif days_diff <= 42:
-                return 0.15   # Within 6 weeks (April renewal catchup)
+                return 0.15   # Within 6 weeks
+            elif days_diff <= 63:
+                return 0.10   # Within 9 weeks (April renewal catchup)
             else:
                 return 0.0    # Too late, reject
         else:
@@ -668,33 +670,34 @@ class ReconciliationSystem:
         if len(parts) < 2:
             return clean_desc
 
-        # Filter out common non-name words
+        # Filter out common non-name words and non-alphabetic strings
         noise_words = {'PAYMENT', 'TRANSFER', 'CREDIT', 'DEBIT', 'REF', 'FT', 'TFR'}
-        name_parts = [p for p in parts if p not in noise_words and not p.isdigit()]
+        # Only keep parts that are mostly alphabetic (allow & for initials like "PA&JC")
+        name_parts = [p for p in parts
+                      if p not in noise_words
+                      and not p.isdigit()
+                      and re.match(r'^[A-Z&]+$', p)]  # Only letters and &
 
-        if len(name_parts) < 2:
+        if len(name_parts) < 1:
             return clean_desc
 
-        # Detect format: "SURNAME I" vs "FIRSTNAME SURNAME"
-        # If second word is a single letter, it's likely "SURNAME I" format
-        if len(name_parts[1]) == 1:
-            surname = name_parts[0]
-            initial = name_parts[1]
-            return f"{surname} {initial}"
+        # Handle joint payments: "ROURKE ROURKE PA&JC" -> surname appears multiple times
+        # Find unique surnames (words > 2 chars that appear, excluding initials)
+        potential_surnames = [p for p in name_parts if len(p) > 2 and '&' not in p]
 
-        # If first word could be a first name and second is longer, treat as "FIRSTNAME SURNAME"
-        # Take the last long word as surname (similar to _normalize_name)
-        potential_surnames = [p for p in name_parts if len(p) > 1]
-        if len(potential_surnames) >= 2:
-            # Assume format is "FIRSTNAME SURNAME [extra]"
-            surname = potential_surnames[1]  # Second long word is likely surname
-            initial = potential_surnames[0][0]  # First letter of first name
-            return f"{surname} {initial}"
+        if not potential_surnames:
+            return clean_desc
 
-        # Fallback: first word surname, first letter of second word as initial
-        surname = name_parts[0]
-        initial = name_parts[1][0]
-        return f"{surname} {initial}"
+        # Use the first surname found (most common in bank descriptions)
+        surname = potential_surnames[0]
+
+        # Find initials - single letters or combined like "PA&JC"
+        initial_parts = [p for p in name_parts if len(p) <= 2 or '&' in p]
+        initial = initial_parts[0][0] if initial_parts else ""
+
+        if initial:
+            return f"{surname} {initial}"
+        return surname
 
     def _normalize_name(self, payee: str) -> str:
         """Normalize beacon payee name to SURNAME I format."""
