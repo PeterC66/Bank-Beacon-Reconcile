@@ -376,6 +376,9 @@ class ReconciliationSystem:
         # Restore rejected status for previously rejected bank transactions
         self._restore_rejected_status()
 
+        # Sort by confidence score (highest first)
+        self.match_suggestions.sort(key=lambda m: m.confidence_score, reverse=True)
+
         return self.match_suggestions
 
     def _restore_rejected_status(self):

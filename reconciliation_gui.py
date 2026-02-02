@@ -474,6 +474,7 @@ class ReconciliationGUI:
         self.stats_label.config(
             text=f"Confirmed: {stats['confirmed_matches']} | "
                  f"Pending: {stats['pending_suggestions']} | "
+                 f"Rejected: {stats['rejected_suggestions']} | "
                  f"Unmatched Bank: {stats['unmatched_bank']}"
         )
 
