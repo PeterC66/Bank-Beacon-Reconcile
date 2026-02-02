@@ -568,7 +568,7 @@ class ReconciliationSystem:
 
     def _calculate_name_score(self, bank_description: str,
                                beacon_payee: str) -> float:
-        """Calculate name similarity score (0-1) based on surname + initial."""
+        """Calculate name similarity score (0-1) based on surname matching."""
         # Extract potential name from bank description
         bank_name = self._extract_name(bank_description)
         beacon_name = self._normalize_name(beacon_payee)
@@ -576,11 +576,43 @@ class ReconciliationSystem:
         if not bank_name or not beacon_name:
             return 0.3  # No name available, neutral score
 
-        # Use sequence matcher for similarity
-        similarity = SequenceMatcher(None, bank_name.lower(),
-                                     beacon_name.lower()).ratio()
+        # Split into parts for comparison
+        bank_parts = bank_name.lower().split()
+        beacon_parts = beacon_name.lower().split()
 
-        return similarity
+        # Check for surname match (first part after normalization)
+        bank_surname = bank_parts[0] if bank_parts else ""
+        beacon_surname = beacon_parts[0] if beacon_parts else ""
+
+        if not bank_surname or not beacon_surname:
+            return 0.3
+
+        # Exact surname match
+        if bank_surname == beacon_surname:
+            # Check initial if available
+            bank_initial = bank_parts[1][0] if len(bank_parts) > 1 else ""
+            beacon_initial = beacon_parts[1][0] if len(beacon_parts) > 1 else ""
+
+            if bank_initial and beacon_initial:
+                if bank_initial == beacon_initial:
+                    return 1.0  # Full match: surname + initial
+                else:
+                    return 0.7  # Surname matches but different initial
+            return 0.9  # Surname matches, no initial to compare
+
+        # Check if one surname contains the other (partial match)
+        if bank_surname in beacon_surname or beacon_surname in bank_surname:
+            return 0.5
+
+        # Use SequenceMatcher only for close matches
+        similarity = SequenceMatcher(None, bank_surname, beacon_surname).ratio()
+
+        # Only return meaningful score if similarity is high (typo tolerance)
+        if similarity >= 0.8:
+            return similarity * 0.8  # Cap at 0.8 for fuzzy matches
+
+        # No meaningful match
+        return 0.0
 
     def _extract_name(self, description: str) -> str:
         """Extract name from bank description (format: SURNAME I)."""
