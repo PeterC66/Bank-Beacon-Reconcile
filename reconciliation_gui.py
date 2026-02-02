@@ -392,87 +392,84 @@ class ReconciliationGUI:
         return widgets
 
     def _create_action_section(self, parent):
-        """Create action buttons and navigation section."""
-        action_frame = ttk.Frame(parent)
+        """Create action buttons and navigation section in two rows."""
+        action_frame = ttk.LabelFrame(parent, text="Navigation & Actions", padding="5")
         action_frame.pack(fill=tk.X, pady=(10, 0))
 
-        # Navigation buttons (left)
-        nav_frame = ttk.Frame(action_frame)
-        nav_frame.pack(side=tk.LEFT)
+        # Row 1: Navigation controls
+        nav_row = ttk.Frame(action_frame)
+        nav_row.pack(fill=tk.X, pady=(0, 5))
 
         self.prev_button = ttk.Button(
-            nav_frame, text="◀ Previous", style='Nav.TButton',
+            nav_row, text="◀ Previous", style='Nav.TButton',
             command=self._on_previous
         )
         self.prev_button.pack(side=tk.LEFT, padx=5)
 
         self.next_button = ttk.Button(
-            nav_frame, text="Next ▶", style='Nav.TButton',
+            nav_row, text="Next ▶", style='Nav.TButton',
             command=self._on_next
         )
         self.next_button.pack(side=tk.LEFT, padx=5)
 
         # Jump to input
-        ttk.Label(nav_frame, text="  Go to:").pack(side=tk.LEFT)
-        self.jump_entry = ttk.Entry(nav_frame, width=5)
+        ttk.Label(nav_row, text="  Go to:").pack(side=tk.LEFT)
+        self.jump_entry = ttk.Entry(nav_row, width=5)
         self.jump_entry.pack(side=tk.LEFT, padx=5)
         self.jump_entry.bind('<Return>', self._on_jump)
+        ttk.Button(nav_row, text="Go", command=self._on_jump).pack(side=tk.LEFT)
 
-        ttk.Button(nav_frame, text="Go", command=self._on_jump).pack(side=tk.LEFT)
-
-        # Skip confirmed checkbox
-        ttk.Label(nav_frame, text="  ").pack(side=tk.LEFT)  # Spacer
+        # Skip checkboxes
+        ttk.Label(nav_row, text="    ").pack(side=tk.LEFT)
         self.skip_confirmed_var = tk.BooleanVar(value=True)
         self.skip_confirmed_check = ttk.Checkbutton(
-            nav_frame, text="Skip confirmed", variable=self.skip_confirmed_var
+            nav_row, text="Skip confirmed", variable=self.skip_confirmed_var
         )
         self.skip_confirmed_check.pack(side=tk.LEFT, padx=5)
 
-        # Skip rejected checkbox (default: skip rejected matches)
         self.skip_rejected_var = tk.BooleanVar(value=True)
         self.skip_rejected_check = ttk.Checkbutton(
-            nav_frame, text="Skip rejected", variable=self.skip_rejected_var
+            nav_row, text="Skip rejected", variable=self.skip_rejected_var
         )
         self.skip_rejected_check.pack(side=tk.LEFT, padx=5)
 
-        # Action buttons (center/right)
-        btn_frame = ttk.Frame(action_frame)
-        btn_frame.pack(side=tk.RIGHT)
+        # Row 2: Action buttons
+        action_row = ttk.Frame(action_frame)
+        action_row.pack(fill=tk.X)
 
         self.confirm_button = ttk.Button(
-            btn_frame, text="✓ Confirm Match", style='Action.TButton',
+            action_row, text="✓ Confirm Match", style='Action.TButton',
             command=self._on_confirm
         )
         self.confirm_button.pack(side=tk.LEFT, padx=5)
 
         self.reject_button = ttk.Button(
-            btn_frame, text="✗ Reject", style='Action.TButton',
+            action_row, text="✗ Reject", style='Action.TButton',
             command=self._on_reject
         )
         self.reject_button.pack(side=tk.LEFT, padx=5)
 
         self.skip_button = ttk.Button(
-            btn_frame, text="⏭ Skip", style='Action.TButton',
+            action_row, text="⏭ Skip", style='Action.TButton',
             command=self._on_skip
         )
         self.skip_button.pack(side=tk.LEFT, padx=5)
 
-        # Control buttons (far right)
-        ctrl_frame = ttk.Frame(action_frame)
-        ctrl_frame.pack(side=tk.RIGHT, padx=20)
+        # Spacer
+        ttk.Label(action_row, text="    ").pack(side=tk.LEFT)
 
         ttk.Button(
-            ctrl_frame, text="Save Progress",
+            action_row, text="Save Progress",
             command=self._on_save
         ).pack(side=tk.LEFT, padx=5)
 
         ttk.Button(
-            ctrl_frame, text="Export Results",
+            action_row, text="Export Results",
             command=self._on_export
         ).pack(side=tk.LEFT, padx=5)
 
         ttk.Button(
-            ctrl_frame, text="Refresh Suggestions",
+            action_row, text="Refresh Suggestions",
             command=self._on_refresh
         ).pack(side=tk.LEFT, padx=5)
 
