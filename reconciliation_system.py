@@ -407,6 +407,10 @@ class ReconciliationSystem:
             name_score = self._calculate_name_score(bank_txn.description, beacon.payee)
             amount_score = self._calculate_amount_score(bank_txn.amount)
 
+            # Skip if name is 0% and amount is common - not a real match
+            if name_score == 0 and bank_txn.amount in self.COMMON_AMOUNTS:
+                continue
+
             # Calculate overall confidence
             confidence = self._calculate_confidence(
                 amount_score, date_score, name_score, bank_txn.amount
@@ -501,6 +505,10 @@ class ReconciliationSystem:
         # Check if individual amounts are common
         is_common1 = beacon1.amount in self.COMMON_AMOUNTS
         is_common2 = beacon2.amount in self.COMMON_AMOUNTS
+
+        # Skip if name is 0% and amounts are common - not a real match
+        if name_score == 0 and (is_common1 and is_common2):
+            return None
 
         # Calculate amount score based on whether amounts are common
         if is_common1 and is_common2:
@@ -620,19 +628,24 @@ class ReconciliationSystem:
 
     def _extract_name(self, description: str) -> str:
         """Extract name from bank description (format: SURNAME I)."""
-        parts = description.upper().split()
+        # Remove U3A references
+        import re
+        clean_desc = re.sub(r'\bu3a\b', '', description, flags=re.IGNORECASE).strip()
+
+        parts = clean_desc.upper().split()
         if len(parts) >= 2:
             # Assume format is "SURNAME INITIAL" or "SURNAME I PAYMENT"
             surname = parts[0]
             initial = parts[1][0] if len(parts[1]) == 1 else parts[1][:1]
             return f"{surname} {initial}"
-        return description
+        return clean_desc
 
     def _normalize_name(self, payee: str) -> str:
         """Normalize beacon payee name to SURNAME I format."""
         import re
-        # Remove trailing member numbers (e.g., "R Challis 589" -> "R Challis")
-        clean_payee = re.sub(r'\s+\d+$', '', payee.strip())
+        # Remove U3A references and trailing member numbers
+        clean_payee = re.sub(r'\bu3a\b', '', payee, flags=re.IGNORECASE).strip()
+        clean_payee = re.sub(r'\s+\d+$', '', clean_payee).strip()
 
         parts = clean_payee.split()
         if len(parts) < 2:
@@ -692,9 +705,31 @@ class ReconciliationSystem:
         self.confirmed_matches.append(match)
 
         # Mark beacon entries as matched
+        confirmed_beacon_ids = set()
         for beacon in match.beacon_entries:
             self.matched_beacon_ids.add(beacon.id)
+            confirmed_beacon_ids.add(beacon.id)
             beacon.matched = True
+
+        # Auto-reject any other pending matches that involve these beacon entries
+        self._reject_matches_with_beacons(confirmed_beacon_ids, exclude_match=match)
+
+    def _reject_matches_with_beacons(self, beacon_ids: set, exclude_match: MatchSuggestion = None):
+        """Reject all pending matches that involve any of the specified beacon entries."""
+        for suggestion in self.match_suggestions:
+            if suggestion == exclude_match:
+                continue
+            if suggestion.status != MatchStatus.PENDING:
+                continue
+
+            # Check if this match involves any of the beacon entries
+            for beacon in suggestion.beacon_entries:
+                if beacon.id in beacon_ids:
+                    suggestion.status = MatchStatus.REJECTED
+                    self.rejected_bank_ids.add(suggestion.bank_transaction.id)
+                    if suggestion not in self.rejected_matches:
+                        self.rejected_matches.append(suggestion)
+                    break
 
     def reject_match(self, match: MatchSuggestion):
         """Reject a match suggestion."""
