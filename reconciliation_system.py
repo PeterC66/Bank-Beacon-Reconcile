@@ -626,13 +626,35 @@ class ReconciliationSystem:
 
     def _normalize_name(self, payee: str) -> str:
         """Normalize beacon payee name to SURNAME I format."""
-        parts = payee.strip().split()
-        if len(parts) >= 2:
-            # Assume format is "I Surname" or "Initial Surname"
+        import re
+        # Remove trailing member numbers (e.g., "R Challis 589" -> "R Challis")
+        clean_payee = re.sub(r'\s+\d+$', '', payee.strip())
+
+        parts = clean_payee.split()
+        if len(parts) < 2:
+            return payee.upper()
+
+        # Find potential surnames (words longer than 1 character)
+        potential_surnames = [p for p in parts if len(p) > 1]
+
+        if not potential_surnames:
+            return payee.upper()
+
+        # Surname is typically the last long word
+        surname = potential_surnames[-1].upper()
+
+        # Find initial - prefer single-letter parts, else first char of first word
+        single_letters = [p[0].upper() for p in parts if len(p) == 1]
+        if single_letters:
+            initial = single_letters[0]
+        elif parts[0].upper() != surname:
             initial = parts[0][0].upper()
-            surname = parts[1].upper()
+        else:
+            initial = ""
+
+        if initial:
             return f"{surname} {initial}"
-        return payee.upper()
+        return surname
 
     def _calculate_amount_score(self, amount: Decimal) -> float:
         """Calculate amount score based on whether it's a common amount."""
