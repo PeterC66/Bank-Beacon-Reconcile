@@ -135,9 +135,13 @@ class ReconciliationGUI:
         return suggestions
 
     def _find_first_pending(self):
-        """Find the index of the first pending match."""
+        """Find the index of the first pending match (skipping rejected)."""
         for i, match in enumerate(self.suggestions):
             if match.status == MatchStatus.PENDING:
+                return i
+        # If no pending, find first non-confirmed, non-rejected
+        for i, match in enumerate(self.suggestions):
+            if match.status not in (MatchStatus.CONFIRMED, MatchStatus.REJECTED):
                 return i
         return 0
 
@@ -393,6 +397,13 @@ class ReconciliationGUI:
         )
         self.skip_confirmed_check.pack(side=tk.LEFT, padx=5)
 
+        # Skip rejected checkbox (default: skip rejected matches)
+        self.skip_rejected_var = tk.BooleanVar(value=True)
+        self.skip_rejected_check = ttk.Checkbutton(
+            nav_frame, text="Skip rejected", variable=self.skip_rejected_var
+        )
+        self.skip_rejected_check.pack(side=tk.LEFT, padx=5)
+
         # Action buttons (center/right)
         btn_frame = ttk.Frame(action_frame)
         btn_frame.pack(side=tk.RIGHT)
@@ -547,30 +558,36 @@ class ReconciliationGUI:
             "or no suitable matches were found."
         )
 
+    def _should_skip_match(self, match):
+        """Check if a match should be skipped based on current settings."""
+        if self.skip_confirmed_var.get() and match.status == MatchStatus.CONFIRMED:
+            return True
+        if self.skip_rejected_var.get() and match.status == MatchStatus.REJECTED:
+            return True
+        return False
+
     def _on_previous(self):
         """Navigate to previous match."""
         if self.current_index > 0:
             self.current_index -= 1
-            # Skip confirmed matches if checkbox is checked
-            if self.skip_confirmed_var.get():
-                while self.current_index > 0:
-                    match = self.suggestions[self.current_index]
-                    if match.status != MatchStatus.CONFIRMED:
-                        break
-                    self.current_index -= 1
+            # Skip confirmed/rejected matches if checkboxes are checked
+            while self.current_index > 0:
+                match = self.suggestions[self.current_index]
+                if not self._should_skip_match(match):
+                    break
+                self.current_index -= 1
             self._update_display()
 
     def _on_next(self):
         """Navigate to next match."""
         if self.current_index < len(self.suggestions) - 1:
             self.current_index += 1
-            # Skip confirmed matches if checkbox is checked
-            if self.skip_confirmed_var.get():
-                while self.current_index < len(self.suggestions) - 1:
-                    match = self.suggestions[self.current_index]
-                    if match.status != MatchStatus.CONFIRMED:
-                        break
-                    self.current_index += 1
+            # Skip confirmed/rejected matches if checkboxes are checked
+            while self.current_index < len(self.suggestions) - 1:
+                match = self.suggestions[self.current_index]
+                if not self._should_skip_match(match):
+                    break
+                self.current_index += 1
             self._update_display()
 
     def _on_jump(self, event=None):

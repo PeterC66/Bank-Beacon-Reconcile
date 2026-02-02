@@ -173,9 +173,12 @@ class ReconciliationSystem:
         self.beacon_entries: List[BeaconEntry] = []
         self.match_suggestions: List[MatchSuggestion] = []
         self.confirmed_matches: List[MatchSuggestion] = []
+        self.rejected_matches: List[MatchSuggestion] = []
 
         # Track which beacon entries are already matched
         self.matched_beacon_ids: set = set()
+        # Track which bank transactions have been rejected (to restore status on reload)
+        self.rejected_bank_ids: set = set()
 
         # Index for fast lookups (built during generate_suggestions)
         self._beacon_by_amount: Dict[Decimal, List[BeaconEntry]] = {}
@@ -267,6 +270,15 @@ class ReconciliationSystem:
                 for m in state.get('confirmed_matches', [])
             ]
 
+            # Load rejected bank IDs
+            self.rejected_bank_ids = set(state.get('rejected_bank_ids', []))
+
+            # Load rejected matches
+            self.rejected_matches = [
+                MatchSuggestion.from_dict(m)
+                for m in state.get('rejected_matches', [])
+            ]
+
             # Mark beacon entries as matched
             for entry in self.beacon_entries:
                 if entry.id in self.matched_beacon_ids:
@@ -279,7 +291,9 @@ class ReconciliationSystem:
         """Save current state to JSON file."""
         state = {
             'matched_beacon_ids': list(self.matched_beacon_ids),
-            'confirmed_matches': [m.to_dict() for m in self.confirmed_matches]
+            'confirmed_matches': [m.to_dict() for m in self.confirmed_matches],
+            'rejected_bank_ids': list(self.rejected_bank_ids),
+            'rejected_matches': [m.to_dict() for m in self.rejected_matches]
         }
 
         with open(self.state_file, 'w') as f:
@@ -359,7 +373,19 @@ class ReconciliationSystem:
         self._report_progress(total_bank, total_bank, "Auto-confirming high-confidence matches...")
         self._auto_confirm_matches()
 
+        # Restore rejected status for previously rejected bank transactions
+        self._restore_rejected_status()
+
         return self.match_suggestions
+
+    def _restore_rejected_status(self):
+        """Restore REJECTED status for previously rejected bank transactions."""
+        for match in self.match_suggestions:
+            if match.bank_transaction.id in self.rejected_bank_ids:
+                if match.status == MatchStatus.PENDING:
+                    match.status = MatchStatus.REJECTED
+                    if match not in self.rejected_matches:
+                        self.rejected_matches.append(match)
 
     def _find_one_to_one_matches_fast(self, bank_txn: BankTransaction) -> List[MatchSuggestion]:
         """Find 1-to-1 matches using indexed lookup."""
@@ -612,6 +638,9 @@ class ReconciliationSystem:
     def reject_match(self, match: MatchSuggestion):
         """Reject a match suggestion."""
         match.status = MatchStatus.REJECTED
+        self.rejected_bank_ids.add(match.bank_transaction.id)
+        if match not in self.rejected_matches:
+            self.rejected_matches.append(match)
 
     def skip_match(self, match: MatchSuggestion):
         """Skip a match for later review."""
@@ -629,6 +658,14 @@ class ReconciliationSystem:
 
         match.status = MatchStatus.PENDING
 
+    def undo_rejection(self, match: MatchSuggestion):
+        """Undo a rejected match."""
+        if match in self.rejected_matches:
+            self.rejected_matches.remove(match)
+
+        self.rejected_bank_ids.discard(match.bank_transaction.id)
+        match.status = MatchStatus.PENDING
+
     def update_match_status(self, match: MatchSuggestion, new_status: MatchStatus):
         """Update match status with proper handling."""
         old_status = match.status
@@ -637,9 +674,16 @@ class ReconciliationSystem:
         if old_status == MatchStatus.CONFIRMED and new_status != MatchStatus.CONFIRMED:
             self.undo_confirmation(match)
 
+        # If changing from rejected, undo the rejection first
+        if old_status == MatchStatus.REJECTED and new_status != MatchStatus.REJECTED:
+            self.undo_rejection(match)
+
         # If changing to confirmed, confirm the match
         if new_status == MatchStatus.CONFIRMED and old_status != MatchStatus.CONFIRMED:
             self.confirm_match(match)
+        # If changing to rejected, reject the match
+        elif new_status == MatchStatus.REJECTED and old_status != MatchStatus.REJECTED:
+            self.reject_match(match)
         else:
             match.status = new_status
 

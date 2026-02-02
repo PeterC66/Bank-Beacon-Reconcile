@@ -394,6 +394,68 @@ def test_export():
     print("✓ Export test PASSED")
 
 
+def test_rejected_persistence():
+    """Test that rejected matches are persisted and restored."""
+    print("\n=== Test: Rejected Match Persistence ===")
+
+    # Create system with a separate test state file
+    test_state_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_rejected_state.json")
+
+    # Remove test state file if exists
+    if os.path.exists(test_state_file):
+        os.remove(test_state_file)
+
+    system = ReconciliationSystem(state_file=test_state_file)
+    system.load_data()
+    suggestions = system.generate_suggestions()
+
+    # Find a pending match and reject it
+    pending = [m for m in suggestions if m.status == MatchStatus.PENDING]
+    assert len(pending) > 0, "No pending matches to test"
+
+    test_match = pending[0]
+    rejected_bank_id = test_match.bank_transaction.id
+    system.reject_match(test_match)
+
+    assert test_match.status == MatchStatus.REJECTED
+    assert rejected_bank_id in system.rejected_bank_ids
+    print(f"✓ Rejected match for bank ID: {rejected_bank_id}")
+
+    system.save_state()
+    print("✓ Saved state with rejected match")
+
+    # Create new system, load state
+    system2 = ReconciliationSystem(state_file=test_state_file)
+    system2.load_data()
+
+    # Check rejected bank IDs are loaded
+    assert rejected_bank_id in system2.rejected_bank_ids, "Rejected bank ID not loaded"
+    print("✓ Rejected bank ID restored from state")
+
+    # Generate suggestions - should restore rejected status
+    suggestions2 = system2.generate_suggestions()
+
+    # Find the match with the rejected bank ID
+    restored_match = next(
+        (m for m in suggestions2 if m.bank_transaction.id == rejected_bank_id),
+        None
+    )
+    assert restored_match is not None, "Rejected match not found in new suggestions"
+    assert restored_match.status == MatchStatus.REJECTED, f"Expected REJECTED, got {restored_match.status.value}"
+    print("✓ Rejected status restored in regenerated suggestions")
+
+    # Test undo rejection
+    system2.undo_rejection(restored_match)
+    assert restored_match.status == MatchStatus.PENDING
+    assert rejected_bank_id not in system2.rejected_bank_ids
+    print("✓ Undo rejection works correctly")
+
+    # Cleanup
+    if os.path.exists(test_state_file):
+        os.remove(test_state_file)
+    print("✓ Rejected match persistence test PASSED")
+
+
 def run_all_tests():
     """Run all tests."""
     print("=" * 60)
@@ -416,6 +478,7 @@ def run_all_tests():
     test_beacon_exclusivity(system)
     test_date_tolerance()
     test_state_persistence()
+    test_rejected_persistence()
     test_export()
 
     # Clean up state file after tests
