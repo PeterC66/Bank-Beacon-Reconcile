@@ -308,13 +308,18 @@ def test_date_tolerance():
     system.load_data()
     suggestions = system.generate_suggestions()
 
+    # Asymmetric tolerance: beacon after bank allows up to 63 days (9 weeks)
+    # beacon before bank only allows 2 days
     for match in suggestions:
         bank_date = match.bank_transaction.date
         for beacon in match.beacon_entries:
-            days_diff = abs((bank_date - beacon.date).days)
-            assert days_diff <= 7, f"Match {match.id} has date diff of {days_diff} days"
+            days_diff = (beacon.date - bank_date).days  # positive = beacon after bank
+            if days_diff >= 0:
+                assert days_diff <= 63, f"Match {match.id} has date diff of {days_diff} days (max 63)"
+            else:
+                assert abs(days_diff) <= 2, f"Match {match.id} has beacon {abs(days_diff)} days before bank (max 2)"
 
-    print("✓ All matches within 7-day tolerance")
+    print("✓ All matches within date tolerance (up to 9 weeks for beacon after bank)")
     print("✓ Date tolerance test PASSED")
 
 

@@ -681,19 +681,26 @@ class ReconciliationSystem:
         if len(name_parts) < 1:
             return clean_desc
 
-        # Handle joint payments: "ROURKE ROURKE PA&JC" -> surname appears multiple times
-        # Find unique surnames (words > 2 chars that appear, excluding initials)
+        # Find potential surnames (words > 2 chars, excluding combined initials like "PA&JC")
         potential_surnames = [p for p in name_parts if len(p) > 2 and '&' not in p]
 
         if not potential_surnames:
             return clean_desc
 
-        # Use the first surname found (most common in bank descriptions)
-        surname = potential_surnames[0]
+        # Use the LAST surname found - in "PAMELA ELIZABETH L LEONARD", surname is last
+        surname = potential_surnames[-1]
 
         # Find initials - single letters or combined like "PA&JC"
+        # Prefer single letter that appears before the surname
         initial_parts = [p for p in name_parts if len(p) <= 2 or '&' in p]
-        initial = initial_parts[0][0] if initial_parts else ""
+
+        # If no explicit initials, use first letter of the first name (first potential surname)
+        if initial_parts:
+            initial = initial_parts[0][0]
+        elif len(potential_surnames) > 1:
+            initial = potential_surnames[0][0]  # First letter of first name
+        else:
+            initial = ""
 
         if initial:
             return f"{surname} {initial}"
