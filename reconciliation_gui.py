@@ -150,6 +150,8 @@ class ReconciliationGUI:
         style.configure('Status.TLabel', font=('Segoe UI', 10, 'bold'))
         style.configure('Nav.TButton', font=('Segoe UI', 10))
         style.configure('Action.TButton', font=('Segoe UI', 10, 'bold'), padding=10)
+        # Larger text for values (description, payee, detail)
+        style.configure('Value.TLabel', font=('Segoe UI', 12))
 
     def _create_widgets(self):
         """Create all GUI widgets."""
@@ -244,7 +246,7 @@ class ReconciliationGUI:
         ttk.Label(details_frame, text="Description:", style='Header.TLabel').grid(
             row=2, column=0, sticky='w', pady=5
         )
-        self.bank_desc_label = ttk.Label(details_frame, text="", wraplength=300)
+        self.bank_desc_label = ttk.Label(details_frame, text="", wraplength=350, style='Value.TLabel')
         self.bank_desc_label.grid(row=2, column=1, sticky='w', padx=10, pady=5)
 
         # Amount (prominent)
@@ -339,12 +341,12 @@ class ReconciliationGUI:
 
         # Payee
         ttk.Label(details, text="Payee:").grid(row=2, column=0, sticky='w', pady=3)
-        widgets['payee'] = ttk.Label(details, text="", wraplength=250)
+        widgets['payee'] = ttk.Label(details, text="", wraplength=300, style='Value.TLabel')
         widgets['payee'].grid(row=2, column=1, sticky='w', padx=10, pady=3)
 
         # Detail
         ttk.Label(details, text="Detail:").grid(row=3, column=0, sticky='w', pady=3)
-        widgets['detail'] = ttk.Label(details, text="", wraplength=250)
+        widgets['detail'] = ttk.Label(details, text="", wraplength=300, style='Value.TLabel')
         widgets['detail'].grid(row=3, column=1, sticky='w', padx=10, pady=3)
 
         # Amount
@@ -382,6 +384,14 @@ class ReconciliationGUI:
         self.jump_entry.bind('<Return>', self._on_jump)
 
         ttk.Button(nav_frame, text="Go", command=self._on_jump).pack(side=tk.LEFT)
+
+        # Skip confirmed checkbox
+        ttk.Label(nav_frame, text="  ").pack(side=tk.LEFT)  # Spacer
+        self.skip_confirmed_var = tk.BooleanVar(value=True)
+        self.skip_confirmed_check = ttk.Checkbutton(
+            nav_frame, text="Skip confirmed", variable=self.skip_confirmed_var
+        )
+        self.skip_confirmed_check.pack(side=tk.LEFT, padx=5)
 
         # Action buttons (center/right)
         btn_frame = ttk.Frame(action_frame)
@@ -541,12 +551,26 @@ class ReconciliationGUI:
         """Navigate to previous match."""
         if self.current_index > 0:
             self.current_index -= 1
+            # Skip confirmed matches if checkbox is checked
+            if self.skip_confirmed_var.get():
+                while self.current_index > 0:
+                    match = self.suggestions[self.current_index]
+                    if match.status != MatchStatus.CONFIRMED:
+                        break
+                    self.current_index -= 1
             self._update_display()
 
     def _on_next(self):
         """Navigate to next match."""
         if self.current_index < len(self.suggestions) - 1:
             self.current_index += 1
+            # Skip confirmed matches if checkbox is checked
+            if self.skip_confirmed_var.get():
+                while self.current_index < len(self.suggestions) - 1:
+                    match = self.suggestions[self.current_index]
+                    if match.status != MatchStatus.CONFIRMED:
+                        break
+                    self.current_index += 1
             self._update_display()
 
     def _on_jump(self, event=None):
