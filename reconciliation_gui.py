@@ -671,8 +671,8 @@ class ReconciliationGUI:
         self._auto_save()
         self._update_display()
 
-        # Auto-advance to next
-        if self.current_index < len(self.suggestions) - 1:
+        # Auto-advance to next (but not when show_all is enabled - let user see status change)
+        if not self.show_all_var.get() and self.current_index < len(self.suggestions) - 1:
             self._on_next()
 
     def _on_reject(self):
@@ -685,8 +685,8 @@ class ReconciliationGUI:
         self._auto_save()
         self._update_display()
 
-        # Auto-advance
-        if self.current_index < len(self.suggestions) - 1:
+        # Auto-advance (but not when show_all is enabled)
+        if not self.show_all_var.get() and self.current_index < len(self.suggestions) - 1:
             self._on_next()
 
     def _on_skip(self):
