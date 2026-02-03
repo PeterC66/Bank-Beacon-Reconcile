@@ -289,30 +289,42 @@ class ReconciliationSystem:
         - Standalone numbers (e.g., "823", "1783")
         - Numbers from U3A references (e.g., "U3A1679" -> "1679")
         - Numbers in patterns like "1786/1785"
+        - Numbers concatenated with text (e.g., "1607HALL" -> "1607", "WHITTINGTON551" -> "551")
+        - Numbers separated by AND (e.g., "U3A1076AND1077" -> "1076", "1077")
+
+        Filters out numbers > 10000 as they are not member numbers.
         """
         import re
 
         numbers = []
 
-        # Extract numbers from U3A references (e.g., U3A1679)
-        u3a_matches = re.findall(r'u3a(\d+)', description, flags=re.IGNORECASE)
-        numbers.extend(u3a_matches)
+        # Extract numbers from U3A references, including AND-separated (e.g., U3A1076AND1077)
+        # First handle U3A followed by numbers with possible AND separators
+        u3a_pattern = r'u3a(\d+(?:and\d+)*)'
+        u3a_matches = re.findall(u3a_pattern, description, flags=re.IGNORECASE)
+        for match in u3a_matches:
+            # Split on AND to get individual numbers
+            for num in re.split(r'and', match, flags=re.IGNORECASE):
+                if num:
+                    numbers.append(num)
 
-        # Extract standalone numbers and slash-separated numbers
-        # First, remove U3A references to avoid double-counting
-        clean_desc = re.sub(r'u3a\d+', '', description, flags=re.IGNORECASE)
+        # Remove U3A references to avoid double-counting
+        clean_desc = re.sub(r'u3a\d+(?:and\d+)*', '', description, flags=re.IGNORECASE)
 
-        # Find all numbers (including slash-separated like 1786/1785)
-        number_matches = re.findall(r'\b(\d+)\b', clean_desc)
+        # Extract all digit sequences (handles concatenated like "1607HALL", "WHITTINGTON551", "1552REA")
+        # This finds any sequence of digits, regardless of word boundaries
+        number_matches = re.findall(r'(\d+)', clean_desc)
         numbers.extend(number_matches)
 
-        # Remove duplicates while preserving order
+        # Remove duplicates while preserving order, and filter out numbers > 10000
         seen = set()
         unique_numbers = []
         for num in numbers:
             if num not in seen:
                 seen.add(num)
-                unique_numbers.append(num)
+                # Filter out large numbers (not member numbers)
+                if int(num) <= 10000:
+                    unique_numbers.append(num)
 
         return unique_numbers
 
