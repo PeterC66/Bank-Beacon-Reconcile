@@ -453,6 +453,17 @@ class ReconciliationGUI:
         )
         self.show_all_check.pack(side=tk.LEFT, padx=10)
 
+        # Trans_no limit for 1-to-2 matches
+        ttk.Label(nav_row, text="1-to-2 trans_no limit:").pack(side=tk.LEFT, padx=(10, 2))
+        self.trans_no_limit_var = tk.IntVar(value=5)
+        self.trans_no_limit_spinbox = ttk.Spinbox(
+            nav_row, from_=1, to=20, width=4,
+            textvariable=self.trans_no_limit_var,
+            command=self._on_trans_no_limit_changed
+        )
+        self.trans_no_limit_spinbox.pack(side=tk.LEFT, padx=2)
+        self.trans_no_limit_spinbox.bind('<Return>', self._on_trans_no_limit_changed)
+
         # Row 2: Action buttons
         action_row = ttk.Frame(action_frame)
         action_row.pack(fill=tk.X)
@@ -752,9 +763,13 @@ class ReconciliationGUI:
         self._apply_queued_changes()
         self.system.save_state()
 
-        # Regenerate suggestions with current show_all setting
+        # Regenerate suggestions with current settings
         include_confirmed = self.show_all_var.get()
-        self.suggestions = self.system.generate_suggestions(include_confirmed=include_confirmed)
+        trans_no_limit = self.trans_no_limit_var.get()
+        self.suggestions = self.system.generate_suggestions(
+            include_confirmed=include_confirmed,
+            trans_no_limit=trans_no_limit
+        )
         self.current_index = 0
 
         self._update_display()
@@ -832,7 +847,27 @@ class ReconciliationGUI:
 
         # Regenerate suggestions with new setting
         include_confirmed = self.show_all_var.get()
-        self.suggestions = self.system.generate_suggestions(include_confirmed=include_confirmed)
+        trans_no_limit = self.trans_no_limit_var.get()
+        self.suggestions = self.system.generate_suggestions(
+            include_confirmed=include_confirmed,
+            trans_no_limit=trans_no_limit
+        )
+        self.current_index = 0
+
+        self._update_display()
+
+    def _on_trans_no_limit_changed(self, event=None):
+        """Handle trans_no limit change - regenerate suggestions."""
+        self._apply_queued_changes()
+        self.system.save_state()
+
+        # Regenerate suggestions with new trans_no limit
+        include_confirmed = self.show_all_var.get()
+        trans_no_limit = self.trans_no_limit_var.get()
+        self.suggestions = self.system.generate_suggestions(
+            include_confirmed=include_confirmed,
+            trans_no_limit=trans_no_limit
+        )
         self.current_index = 0
 
         self._update_display()

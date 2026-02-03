@@ -432,14 +432,17 @@ class ReconciliationSystem:
             self.progress_callback(current, total, message)
 
     def generate_suggestions(self, progress_callback: Callable[[int, int, str], None] = None,
-                             include_confirmed: bool = False) -> List[MatchSuggestion]:
+                             include_confirmed: bool = False,
+                             trans_no_limit: int = 5) -> List[MatchSuggestion]:
         """Generate match suggestions for bank transactions.
 
         Args:
             progress_callback: Optional callback for progress updates
             include_confirmed: If True, include bank transactions that already have confirmed matches
+            trans_no_limit: Maximum difference between trans_no values for 1-to-2 matches
         """
         self.progress_callback = progress_callback
+        self.trans_no_limit = trans_no_limit
         self.match_suggestions = []
         suggestion_id = 0
 
@@ -649,7 +652,7 @@ class ReconciliationSystem:
 
                     for b2 in beacons1[i+1:]:
                         # Check if trans_no values are within 3 of each other
-                        if not self._trans_no_within_range(b1.trans_no, b2.trans_no, 3):
+                        if not self._trans_no_within_range(b1.trans_no, b2.trans_no, self.trans_no_limit):
                             continue
 
                         # Check date early for b2
@@ -669,7 +672,7 @@ class ReconciliationSystem:
 
                     for b2 in beacons2:
                         # Check if trans_no values are within 3 of each other
-                        if not self._trans_no_within_range(b1.trans_no, b2.trans_no, 3):
+                        if not self._trans_no_within_range(b1.trans_no, b2.trans_no, self.trans_no_limit):
                             continue
 
                         # Check date early for b2
