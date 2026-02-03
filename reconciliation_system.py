@@ -274,7 +274,8 @@ class ReconciliationSystem:
                     self.member_lookup[mem_no] = {
                         'status': row['status'].strip(),
                         'forename': row['forename'].strip(),
-                        'surname': row['surname'].strip()
+                        'surname': row['surname'].strip(),
+                        'known_as': row.get('known_as', '').strip()
                     }
                 except KeyError as e:
                     print(f"Warning: Could not parse member lookup row: {e}")
@@ -326,6 +327,9 @@ class ReconciliationSystem:
         """Get member lookup text for display in GUI.
 
         Returns formatted text showing member info for all numbers in description.
+        Format: "Member NNN: Forename (known_as) Surname (status)"
+        - known_as only shown if non-empty
+        - status only shown if not "current"
         """
         numbers = self.extract_member_numbers(description)
 
@@ -336,7 +340,16 @@ class ReconciliationSystem:
         for num in numbers:
             member = self.lookup_member(num)
             if member:
-                name = f"{member['forename']} {member['surname']}"
+                # Build name: Forename (known_as) Surname
+                forename = member['forename']
+                known_as = member['known_as']
+                surname = member['surname']
+
+                if known_as:
+                    name = f"{forename} ({known_as}) {surname}"
+                else:
+                    name = f"{forename} {surname}"
+
                 if member['status'].lower() != 'current':
                     name += f" ({member['status']})"
                 lines.append(f"Member {num}: {name}")
