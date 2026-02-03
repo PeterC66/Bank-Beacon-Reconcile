@@ -79,18 +79,26 @@ class ReconciliationGUI:
         self._create_widgets()
         self._update_display()
 
-        # Show summary after GUI loads
+        # Show summary after GUI loads, then run consistency check
         if bank_count > 0 and beacon_count > 0:
             confirmed = len([m for m in self.suggestions if m.status == MatchStatus.CONFIRMED])
             pending = len([m for m in self.suggestions if m.status == MatchStatus.PENDING])
-            self.master.after(100, lambda: messagebox.showinfo(
-                "Data Loaded",
-                f"Loaded {bank_count} bank transactions\n"
-                f"Loaded {beacon_count} beacon entries\n"
-                f"Generated {len(self.suggestions)} match suggestions\n\n"
-                f"Auto-confirmed: {confirmed}\n"
-                f"Pending review: {pending}"
+            self.master.after(100, lambda: self._show_startup_summary(
+                bank_count, beacon_count, confirmed, pending
             ))
+
+    def _show_startup_summary(self, bank_count, beacon_count, confirmed, pending):
+        """Show startup summary and then run consistency check."""
+        messagebox.showinfo(
+            "Data Loaded",
+            f"Loaded {bank_count} bank transactions\n"
+            f"Loaded {beacon_count} beacon entries\n"
+            f"Generated {len(self.suggestions)} match suggestions\n\n"
+            f"Auto-confirmed: {confirmed}\n"
+            f"Pending review: {pending}"
+        )
+        # Run consistency check after summary is closed (don't show message if clean)
+        self.master.after(100, lambda: self._run_consistency_check(show_message_if_clean=False))
 
     def _generate_with_progress(self):
         """Generate suggestions with a progress dialog."""
@@ -504,6 +512,38 @@ class ReconciliationGUI:
             command=self._on_refresh
         ).pack(side=tk.LEFT, padx=5)
 
+        # Row 3: Consistency check controls
+        consistency_row = ttk.Frame(action_frame)
+        consistency_row.pack(fill=tk.X, pady=(5, 0))
+
+        ttk.Button(
+            consistency_row, text="Check Consistency",
+            command=self._on_check_consistency
+        ).pack(side=tk.LEFT, padx=5)
+
+        self.prev_issue_button = ttk.Button(
+            consistency_row, text="◄ Prev Issue",
+            command=self._on_prev_inconsistency,
+            state=tk.DISABLED
+        )
+        self.prev_issue_button.pack(side=tk.LEFT, padx=5)
+
+        self.next_issue_button = ttk.Button(
+            consistency_row, text="Next Issue ►",
+            command=self._on_next_inconsistency,
+            state=tk.DISABLED
+        )
+        self.next_issue_button.pack(side=tk.LEFT, padx=5)
+
+        self.inconsistency_label = ttk.Label(
+            consistency_row, text="", foreground='gray'
+        )
+        self.inconsistency_label.pack(side=tk.LEFT, padx=10)
+
+        # Track inconsistencies
+        self.inconsistencies = []  # List of (match, reason) tuples
+        self.current_inconsistency_index = 0
+
     def _update_display(self):
         """Update the display for the current match."""
         if not self.suggestions:
@@ -871,6 +911,133 @@ class ReconciliationGUI:
         self.current_index = 0
 
         self._update_display()
+
+    def _on_check_consistency(self):
+        """Run consistency check and navigate to first inconsistency if found."""
+        self._run_consistency_check()
+
+    def _run_consistency_check(self, show_message_if_clean=True):
+        """Run consistency check with optional progress dialog.
+
+        Args:
+            show_message_if_clean: If True, show a message box when no issues found
+        """
+        # For large datasets, show progress dialog
+        confirmed_count = len(self.system.confirmed_matches)
+
+        if confirmed_count > 100:
+            # Create progress dialog
+            progress_window = tk.Toplevel(self.master)
+            progress_window.title("Checking Consistency")
+            progress_window.geometry("400x100")
+            progress_window.transient(self.master)
+            progress_window.grab_set()
+
+            # Center the dialog
+            progress_window.update_idletasks()
+            x = self.master.winfo_x() + (self.master.winfo_width() - 400) // 2
+            y = self.master.winfo_y() + (self.master.winfo_height() - 100) // 2
+            progress_window.geometry(f"+{x}+{y}")
+
+            ttk.Label(progress_window, text="Checking consistency...",
+                      font=('Segoe UI', 11)).pack(pady=(15, 5))
+
+            progress_bar = ttk.Progressbar(progress_window, length=350, mode='determinate')
+            progress_bar.pack(pady=10)
+
+            def update_progress(current, total, message):
+                progress_bar['maximum'] = total
+                progress_bar['value'] = current
+                progress_window.update()
+
+            self.inconsistencies = self.system.check_consistency(progress_callback=update_progress)
+            progress_window.destroy()
+        else:
+            self.inconsistencies = self.system.check_consistency()
+
+        self.current_inconsistency_index = 0
+        self._update_inconsistency_ui()
+
+        if self.inconsistencies:
+            # Navigate to first inconsistency
+            self._navigate_to_inconsistency(0)
+        elif show_message_if_clean:
+            messagebox.showinfo("Consistency Check", "No inconsistencies found.")
+
+    def _update_inconsistency_ui(self):
+        """Update the inconsistency navigation UI based on current state."""
+        if not self.inconsistencies:
+            self.prev_issue_button.config(state=tk.DISABLED)
+            self.next_issue_button.config(state=tk.DISABLED)
+            self.inconsistency_label.config(text="No inconsistencies found", foreground='green')
+        else:
+            count = len(self.inconsistencies)
+            current = self.current_inconsistency_index + 1
+            self.inconsistency_label.config(
+                text=f"Issue {current}/{count}: {self.inconsistencies[self.current_inconsistency_index][1]}",
+                foreground='red'
+            )
+            # Enable/disable buttons based on position
+            self.prev_issue_button.config(
+                state=tk.NORMAL if self.current_inconsistency_index > 0 else tk.DISABLED
+            )
+            self.next_issue_button.config(
+                state=tk.NORMAL if self.current_inconsistency_index < count - 1 else tk.DISABLED
+            )
+
+    def _navigate_to_inconsistency(self, index):
+        """Navigate to a specific inconsistency by index."""
+        if not self.inconsistencies or index < 0 or index >= len(self.inconsistencies):
+            return
+
+        self.current_inconsistency_index = index
+        match, reason = self.inconsistencies[index]
+
+        # Find the match in the suggestions list
+        # First, ensure we're showing all transactions (including confirmed)
+        if not self.show_all_var.get():
+            self.show_all_var.set(True)
+            self._on_show_all_changed()
+
+        # Find the match index in suggestions
+        match_index = self.system.find_match_in_suggestions(match)
+        if match_index >= 0:
+            self.current_index = match_index
+            self._update_display()
+
+        self._update_inconsistency_ui()
+
+    def _on_prev_inconsistency(self):
+        """Navigate to previous inconsistency (re-checks for accuracy)."""
+        # Re-run consistency check to get updated list
+        self.inconsistencies = self.system.check_consistency()
+
+        if not self.inconsistencies:
+            self._update_inconsistency_ui()
+            return
+
+        # Find current match in new inconsistency list or go to previous
+        new_index = max(0, self.current_inconsistency_index - 1)
+        if new_index >= len(self.inconsistencies):
+            new_index = len(self.inconsistencies) - 1
+
+        self._navigate_to_inconsistency(new_index)
+
+    def _on_next_inconsistency(self):
+        """Navigate to next inconsistency (re-checks for accuracy)."""
+        # Re-run consistency check to get updated list
+        self.inconsistencies = self.system.check_consistency()
+
+        if not self.inconsistencies:
+            self._update_inconsistency_ui()
+            return
+
+        # Move to next or stay at end
+        new_index = self.current_inconsistency_index + 1
+        if new_index >= len(self.inconsistencies):
+            new_index = len(self.inconsistencies) - 1
+
+        self._navigate_to_inconsistency(new_index)
 
 
 def main():

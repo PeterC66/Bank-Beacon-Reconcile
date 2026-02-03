@@ -1146,6 +1146,78 @@ class ReconciliationSystem:
                     str(b2.amount) if b2 else ''
                 ])
 
+    def check_consistency(self, progress_callback: Callable[[int, int, str], None] = None) -> List[Tuple['MatchSuggestion', str]]:
+        """Check for inconsistencies in confirmed matches.
+
+        Returns a list of (match, reason) tuples for any inconsistent matches.
+
+        Checks:
+        1. Each beacon transaction is confirmed in at most one match
+        2. Each confirmed match has bank amount = sum of beacon amounts
+        """
+        inconsistencies = []
+        total_checks = len(self.confirmed_matches) * 2  # Two checks per match
+        current_check = 0
+
+        # Build a map of beacon_id -> list of confirmed matches that include it
+        beacon_to_matches: Dict[str, List[MatchSuggestion]] = {}
+        for match in self.confirmed_matches:
+            for beacon in match.beacon_entries:
+                if beacon.id not in beacon_to_matches:
+                    beacon_to_matches[beacon.id] = []
+                beacon_to_matches[beacon.id].append(match)
+
+        # Check 1: Each beacon should be in at most one confirmed match
+        checked_beacons = set()
+        for match in self.confirmed_matches:
+            current_check += 1
+            if progress_callback:
+                progress_callback(current_check, total_checks, "Checking beacon uniqueness...")
+
+            for beacon in match.beacon_entries:
+                if beacon.id in checked_beacons:
+                    continue
+                checked_beacons.add(beacon.id)
+
+                matches_with_beacon = beacon_to_matches.get(beacon.id, [])
+                if len(matches_with_beacon) > 1:
+                    # This beacon is in multiple confirmed matches
+                    match_ids = [m.id for m in matches_with_beacon]
+                    reason = f"Beacon {beacon.id} ({beacon.payee}, £{beacon.amount}) is confirmed in multiple matches: {', '.join(match_ids)}"
+                    # Add each match that shares this beacon as inconsistent
+                    for m in matches_with_beacon:
+                        if (m, reason) not in inconsistencies:
+                            inconsistencies.append((m, reason))
+
+        # Check 2: Bank amount should equal sum of beacon amounts
+        for match in self.confirmed_matches:
+            current_check += 1
+            if progress_callback:
+                progress_callback(current_check, total_checks, "Checking amount consistency...")
+
+            if not match.beacon_entries:
+                continue
+
+            bank_amount = match.bank_transaction.amount
+            beacon_total = sum(b.amount for b in match.beacon_entries)
+
+            if bank_amount != beacon_total:
+                reason = f"Amount mismatch: Bank £{bank_amount} != Beacon total £{beacon_total}"
+                if (match, reason) not in inconsistencies:
+                    inconsistencies.append((match, reason))
+
+        return inconsistencies
+
+    def find_match_in_suggestions(self, match: 'MatchSuggestion') -> int:
+        """Find the index of a match in the current suggestions list.
+
+        Returns -1 if not found.
+        """
+        for i, suggestion in enumerate(self.match_suggestions):
+            if suggestion.id == match.id:
+                return i
+        return -1
+
 
 def main():
     """Main function for command-line usage."""
