@@ -495,13 +495,17 @@ class ReconciliationSystem:
             all_matches = one_to_one + one_to_two
             all_matches.sort(key=lambda m: m.confidence_score, reverse=True)
 
-            # Take the best match if any exist
-            if all_matches:
-                best_match = all_matches[0]
-                best_match.id = f"MATCH_{suggestion_id:04d}"
-                self.match_suggestions.append(best_match)
-                suggestion_id += 1
-            else:
+            # Add all matches above minimum confidence threshold
+            MIN_CONFIDENCE_THRESHOLD = 0.1
+            matches_added = 0
+            for match in all_matches:
+                if match.confidence_score >= MIN_CONFIDENCE_THRESHOLD:
+                    match.id = f"MATCH_{suggestion_id:04d}"
+                    self.match_suggestions.append(match)
+                    suggestion_id += 1
+                    matches_added += 1
+
+            if matches_added == 0:
                 # Create a suggestion with no beacon matches for unmatched bank txn
                 suggestion = MatchSuggestion(
                     id=f"MATCH_{suggestion_id:04d}",
