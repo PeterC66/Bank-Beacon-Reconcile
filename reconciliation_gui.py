@@ -205,6 +205,7 @@ class ReconciliationGUI:
         self.search_entry.bind('<Return>', self._on_search)
 
         ttk.Button(search_row, text="Find", command=self._on_search).pack(side=tk.LEFT, padx=2)
+        ttk.Button(search_row, text="Find Prev", command=self._on_search_prev).pack(side=tk.LEFT, padx=2)
         ttk.Button(search_row, text="Find Next", command=self._on_search_next).pack(side=tk.LEFT, padx=2)
         ttk.Button(search_row, text="Clear", command=self._on_search_clear).pack(side=tk.LEFT, padx=2)
 
@@ -709,14 +710,27 @@ class ReconciliationGUI:
 
     def _apply_queued_changes(self):
         """Apply all queued status changes."""
+        changes_made = False
         for match_id, new_status in self.queued_changes.items():
             # Find the match
             for match in self.suggestions:
                 if match.id == match_id:
                     self.system.update_match_status(match, new_status)
+                    changes_made = True
                     break
 
         self.queued_changes.clear()
+
+        # Re-sort suggestions after status changes to maintain correct order
+        if changes_made and self.suggestions:
+            current_match = self.suggestions[self.current_index] if self.current_index < len(self.suggestions) else None
+            self.system._sort_suggestions()
+            # Try to maintain position on the same match after re-sort
+            if current_match:
+                try:
+                    self.current_index = self.suggestions.index(current_match)
+                except ValueError:
+                    self.current_index = min(self.current_index, len(self.suggestions) - 1)
 
     def _on_save(self):
         """Save current progress."""
@@ -785,6 +799,19 @@ class ReconciliationGUI:
             return
 
         self.search_index = (self.search_index + 1) % len(self.search_matches)
+        self.current_index = self.search_matches[self.search_index]
+        self._update_display()
+        self.search_result_label.config(
+            text=f"Found {len(self.search_matches)} matches ({self.search_index + 1}/{len(self.search_matches)})"
+        )
+
+    def _on_search_prev(self):
+        """Go to previous search result."""
+        if not self.search_matches:
+            self.search_result_label.config(text="No search results")
+            return
+
+        self.search_index = (self.search_index - 1) % len(self.search_matches)
         self.current_index = self.search_matches[self.search_index]
         self._update_display()
         self.search_result_label.config(

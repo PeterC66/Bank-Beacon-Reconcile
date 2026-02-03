@@ -593,6 +593,26 @@ class ReconciliationSystem:
 
         return matches
 
+    def _trans_no_within_range(self, trans_no1: str, trans_no2: str, max_diff: int) -> bool:
+        """Check if two transaction numbers are within max_diff of each other.
+
+        Returns True if both trans_no values can be converted to integers and
+        their absolute difference is <= max_diff. Returns False otherwise.
+        """
+        try:
+            # Try direct integer conversion (works for pure numbers)
+            num1 = int(trans_no1)
+            num2 = int(trans_no2)
+            return abs(num1 - num2) <= max_diff
+        except (ValueError, TypeError):
+            # Fall back to extracting numeric part for prefixed formats like "TRN001"
+            import re
+            match1 = re.search(r'(\d+)', str(trans_no1))
+            match2 = re.search(r'(\d+)', str(trans_no2))
+            if match1 and match2:
+                return abs(int(match1.group(1)) - int(match2.group(1))) <= max_diff
+            return False
+
     def _find_one_to_two_matches_fast(self, bank_txn: BankTransaction) -> List[MatchSuggestion]:
         """Find 1-to-2 matches using indexed lookup (optimized)."""
         matches = []
@@ -628,6 +648,10 @@ class ReconciliationSystem:
                         continue
 
                     for b2 in beacons1[i+1:]:
+                        # Check if trans_no values are within 3 of each other
+                        if not self._trans_no_within_range(b1.trans_no, b2.trans_no, 3):
+                            continue
+
                         # Check date early for b2
                         date_score2 = self._calculate_date_score(bank_date, b2.date)
                         if date_score2 == 0:
@@ -644,6 +668,11 @@ class ReconciliationSystem:
                         continue
 
                     for b2 in beacons2:
+                        # Check if trans_no values are within 3 of each other
+                        if not self._trans_no_within_range(b1.trans_no, b2.trans_no, 3):
+                            continue
+
+                        # Check date early for b2
                         date_score2 = self._calculate_date_score(bank_date, b2.date)
                         if date_score2 == 0:
                             continue
