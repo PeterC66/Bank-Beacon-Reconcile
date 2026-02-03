@@ -997,6 +997,7 @@ class ReconciliationSystem:
     def confirm_match(self, match: MatchSuggestion):
         """Confirm a match and mark beacon entries as matched."""
         match.status = MatchStatus.CONFIRMED
+        print(f"[DEBUG] confirm_match: set {match.id} status to CONFIRMED")
         self.confirmed_matches.append(match)
 
         # Mark beacon entries as matched
@@ -1007,20 +1008,28 @@ class ReconciliationSystem:
             beacon.matched = True
 
         # Auto-reject any other pending matches that involve these beacon entries
+        print(f"[DEBUG] confirm_match: calling _reject_matches_with_beacons, match status={match.status}")
         self._reject_matches_with_beacons(confirmed_beacon_ids, exclude_match=match)
+        print(f"[DEBUG] confirm_match: after _reject_matches_with_beacons, match status={match.status}")
 
         # Auto-reject any other pending matches for this bank transaction
+        print(f"[DEBUG] confirm_match: calling _reject_matches_for_bank, match status={match.status}")
         self._reject_matches_for_bank(match.bank_transaction.id, exclude_match=match)
+        print(f"[DEBUG] confirm_match: after _reject_matches_for_bank, match status={match.status}")
 
     def _reject_matches_for_bank(self, bank_id: str, exclude_match: MatchSuggestion = None):
         """Reject all pending matches for the specified bank transaction."""
         for suggestion in self.match_suggestions:
-            if suggestion == exclude_match:
+            # Use identity comparison (is) not value comparison (==)
+            # because dataclass == compares all fields including status
+            if suggestion is exclude_match:
+                print(f"[DEBUG] _reject_matches_for_bank: skipping {suggestion.id} (is exclude_match)")
                 continue
             if suggestion.status != MatchStatus.PENDING:
                 continue
 
             if suggestion.bank_transaction.id == bank_id:
+                print(f"[DEBUG] _reject_matches_for_bank: rejecting {suggestion.id} for bank {bank_id}")
                 suggestion.status = MatchStatus.REJECTED
                 self.rejected_bank_ids.add(bank_id)
                 if suggestion not in self.rejected_matches:
@@ -1029,7 +1038,9 @@ class ReconciliationSystem:
     def _reject_matches_with_beacons(self, beacon_ids: set, exclude_match: MatchSuggestion = None):
         """Reject all pending matches that involve any of the specified beacon entries."""
         for suggestion in self.match_suggestions:
-            if suggestion == exclude_match:
+            # Use identity comparison (is) not value comparison (==)
+            # because dataclass == compares all fields including status
+            if suggestion is exclude_match:
                 continue
             if suggestion.status != MatchStatus.PENDING:
                 continue
@@ -1068,32 +1079,51 @@ class ReconciliationSystem:
 
     def undo_rejection(self, match: MatchSuggestion):
         """Undo a rejected match."""
+        print(f"[DEBUG] undo_rejection: {match.id}, in rejected_matches={match in self.rejected_matches}")
         if match in self.rejected_matches:
             self.rejected_matches.remove(match)
+            print(f"[DEBUG] undo_rejection: removed from rejected_matches")
+        else:
+            print(f"[DEBUG] undo_rejection: NOT in rejected_matches! len={len(self.rejected_matches)}")
+            # Check if there's a match with same ID
+            for rm in self.rejected_matches:
+                if rm.id == match.id:
+                    print(f"[DEBUG] undo_rejection: found match by ID, same object={rm is match}")
+                    break
 
         self.rejected_bank_ids.discard(match.bank_transaction.id)
         match.status = MatchStatus.PENDING
+        print(f"[DEBUG] undo_rejection: set status to PENDING")
 
     def update_match_status(self, match: MatchSuggestion, new_status: MatchStatus):
         """Update match status with proper handling."""
         old_status = match.status
+        print(f"[DEBUG] update_match_status: {match.id} from {old_status} to {new_status}")
 
         # If changing from confirmed, undo the confirmation first
         if old_status == MatchStatus.CONFIRMED and new_status != MatchStatus.CONFIRMED:
+            print(f"[DEBUG]   -> undo_confirmation")
             self.undo_confirmation(match)
 
         # If changing from rejected, undo the rejection first
         if old_status == MatchStatus.REJECTED and new_status != MatchStatus.REJECTED:
+            print(f"[DEBUG]   -> undo_rejection")
             self.undo_rejection(match)
+            print(f"[DEBUG]   -> after undo_rejection: status={match.status}")
 
         # If changing to confirmed, confirm the match
         if new_status == MatchStatus.CONFIRMED and old_status != MatchStatus.CONFIRMED:
+            print(f"[DEBUG]   -> confirm_match")
             self.confirm_match(match)
+            print(f"[DEBUG]   -> after confirm_match: status={match.status}")
         # If changing to rejected, reject the match
         elif new_status == MatchStatus.REJECTED and old_status != MatchStatus.REJECTED:
+            print(f"[DEBUG]   -> reject_match")
             self.reject_match(match)
         else:
             match.status = new_status
+
+        print(f"[DEBUG]   -> final status: {match.status}")
 
     def get_statistics(self) -> Dict:
         """Get reconciliation statistics."""
