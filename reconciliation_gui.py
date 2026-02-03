@@ -588,10 +588,14 @@ class ReconciliationGUI:
                  f"Rejected: {stats['rejected_suggestions']} | "
                  f"Unmatched Bank: {stats['unmatched_bank']}"
         )
+        self.stats_label.update_idletasks()
 
         # Update status indicator
         self.status_label.config(text=self.STATUS_LABELS.get(display_status, 'PENDING'))
         self.bank_status_frame.config(bg=self.COLORS.get(display_status, self.COLORS[MatchStatus.PENDING]))
+        # Force UI refresh
+        self.status_label.update_idletasks()
+        self.bank_status_frame.update_idletasks()
 
         # Update match type
         self.match_type_label.config(text=match.match_type.upper())
@@ -730,10 +734,16 @@ class ReconciliationGUI:
             return
 
         match = self.suggestions[self.current_index]
+        print(f"[DEBUG] Confirming match {match.id}, was status={match.status}")
 
         # Queue the change (will be applied when moving forward or saving)
         self.queued_changes[match.id] = MatchStatus.CONFIRMED
         self._auto_save()
+
+        # Verify the change was applied
+        current_match = self.suggestions[self.current_index]
+        print(f"[DEBUG] After confirm: match {current_match.id}, now status={current_match.status}")
+
         self._update_display()
 
         # Auto-advance to next (but not when show_all is enabled - let user see status change)
@@ -746,8 +756,15 @@ class ReconciliationGUI:
             return
 
         match = self.suggestions[self.current_index]
+        print(f"[DEBUG] Rejecting match {match.id}, was status={match.status}")
+
         self.queued_changes[match.id] = MatchStatus.REJECTED
         self._auto_save()
+
+        # Verify the change was applied
+        current_match = self.suggestions[self.current_index]
+        print(f"[DEBUG] After reject: match {current_match.id}, now status={current_match.status}")
+
         self._update_display()
 
         # Auto-advance (but not when show_all is enabled)
@@ -782,6 +799,7 @@ class ReconciliationGUI:
                 if match.id == match_id:
                     self.system.update_match_status(match, new_status)
                     changes_made = True
+                    print(f"[DEBUG] Applied {new_status} to {match_id}")
                     break
 
         self.queued_changes.clear()
@@ -789,13 +807,16 @@ class ReconciliationGUI:
         # Re-sort suggestions after status changes to maintain correct order
         if changes_made and self.suggestions:
             current_match = self.suggestions[self.current_index] if self.current_index < len(self.suggestions) else None
+            old_index = self.current_index
             self.system._sort_suggestions()
             # Try to maintain position on the same match after re-sort
             if current_match:
                 try:
                     self.current_index = self.suggestions.index(current_match)
+                    print(f"[DEBUG] Reindex: {old_index} -> {self.current_index}, match {current_match.id} now {current_match.status}")
                 except ValueError:
                     self.current_index = min(self.current_index, len(self.suggestions) - 1)
+                    print(f"[DEBUG] Match not found after sort, staying at index {self.current_index}")
 
     def _on_save(self):
         """Save current progress."""
