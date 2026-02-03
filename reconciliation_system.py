@@ -308,8 +308,8 @@ class ReconciliationSystem:
                 if num:
                     numbers.append(num)
 
-        # Remove U3A references to avoid double-counting
-        clean_desc = re.sub(r'u3a\d+(?:and\d+)*', '', description, flags=re.IGNORECASE)
+        # Remove ALL U3A references (with or without attached numbers) to avoid extracting "3" from "U3A"
+        clean_desc = re.sub(r'u3a\d*(?:and\d+)*', '', description, flags=re.IGNORECASE)
 
         # Extract all digit sequences (handles concatenated like "1607HALL", "WHITTINGTON551", "1552REA")
         # This finds any sequence of digits, regardless of word boundaries
