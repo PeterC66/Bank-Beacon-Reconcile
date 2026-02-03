@@ -313,33 +313,59 @@ class ReconciliationSystem:
         if self.progress_callback:
             self.progress_callback(current, total, message)
 
-    def generate_suggestions(self, progress_callback: Callable[[int, int, str], None] = None) -> List[MatchSuggestion]:
-        """Generate match suggestions for all unmatched bank transactions."""
+    def generate_suggestions(self, progress_callback: Callable[[int, int, str], None] = None,
+                             include_confirmed: bool = False) -> List[MatchSuggestion]:
+        """Generate match suggestions for bank transactions.
+
+        Args:
+            progress_callback: Optional callback for progress updates
+            include_confirmed: If True, include bank transactions that already have confirmed matches
+        """
         self.progress_callback = progress_callback
         self.match_suggestions = []
         suggestion_id = 0
 
-        # Get bank transactions that don't have confirmed matches
+        # Get bank transactions to process
         confirmed_bank_ids = {m.bank_transaction.id for m in self.confirmed_matches}
-        unmatched_bank = [t for t in self.bank_transactions
-                         if t.id not in confirmed_bank_ids]
+
+        if include_confirmed:
+            # Include all bank transactions
+            bank_to_process = list(self.bank_transactions)
+        else:
+            # Only unmatched bank transactions
+            bank_to_process = [t for t in self.bank_transactions
+                              if t.id not in confirmed_bank_ids]
 
         # Get available beacon entries (not matched)
         available_beacon = [e for e in self.beacon_entries
                           if e.id not in self.matched_beacon_ids]
 
-        total_bank = len(unmatched_bank)
+        total_bank = len(bank_to_process)
 
         if total_bank == 0:
-            return self.match_suggestions
+            # If include_confirmed, still add the confirmed matches
+            if include_confirmed:
+                for match in self.confirmed_matches:
+                    self.match_suggestions.append(match)
+            return self._sort_suggestions()
 
         # Build index for fast lookups
         self._report_progress(0, total_bank, "Building index...")
         self._build_beacon_index(available_beacon)
 
         # Process each bank transaction
-        for idx, bank_txn in enumerate(unmatched_bank):
+        for idx, bank_txn in enumerate(bank_to_process):
             self._report_progress(idx + 1, total_bank, f"Processing {bank_txn.description[:20]}...")
+
+            # Check if this bank transaction already has a confirmed match
+            if bank_txn.id in confirmed_bank_ids:
+                # Find and add the existing confirmed match
+                for match in self.confirmed_matches:
+                    if match.bank_transaction.id == bank_txn.id:
+                        if match not in self.match_suggestions:
+                            self.match_suggestions.append(match)
+                        break
+                continue
 
             # Find 1-to-1 matches (optimized)
             one_to_one = self._find_one_to_one_matches_fast(bank_txn)
@@ -376,8 +402,23 @@ class ReconciliationSystem:
         # Restore rejected status for previously rejected bank transactions
         self._restore_rejected_status()
 
-        # Sort by confidence score (highest first)
-        self.match_suggestions.sort(key=lambda m: m.confidence_score, reverse=True)
+        return self._sort_suggestions()
+
+    def _sort_suggestions(self) -> List[MatchSuggestion]:
+        """Sort suggestions by bank transaction, then status, then confidence."""
+        # Status priority: confirmed=0, pending=1, skipped=2, rejected=3
+        status_priority = {
+            MatchStatus.CONFIRMED: 0,
+            MatchStatus.PENDING: 1,
+            MatchStatus.SKIPPED: 2,
+            MatchStatus.REJECTED: 3,
+        }
+
+        self.match_suggestions.sort(key=lambda m: (
+            m.bank_transaction.id,  # Group by bank transaction
+            status_priority.get(m.status, 1),  # Then by status priority
+            -m.confidence_score  # Then by confidence (highest first, hence negative)
+        ))
 
         return self.match_suggestions
 

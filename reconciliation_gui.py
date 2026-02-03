@@ -433,6 +433,15 @@ class ReconciliationGUI:
         )
         self.skip_rejected_check.pack(side=tk.LEFT, padx=5)
 
+        # Show all transactions checkbox
+        self.show_all_var = tk.BooleanVar(value=False)
+        self.show_all_check = ttk.Checkbutton(
+            nav_row, text="Show all transactions",
+            variable=self.show_all_var,
+            command=self._on_show_all_changed
+        )
+        self.show_all_check.pack(side=tk.LEFT, padx=10)
+
         # Row 2: Action buttons
         action_row = ttk.Frame(action_frame)
         action_row.pack(fill=tk.X)
@@ -715,14 +724,15 @@ class ReconciliationGUI:
         self._apply_queued_changes()
         self.system.save_state()
 
-        # Regenerate suggestions
-        self.suggestions = self.system.generate_suggestions()
+        # Regenerate suggestions with current show_all setting
+        include_confirmed = self.show_all_var.get()
+        self.suggestions = self.system.generate_suggestions(include_confirmed=include_confirmed)
         self.current_index = 0
 
         self._update_display()
         messagebox.showinfo(
             "Refreshed",
-            f"Generated {len(self.suggestions)} new match suggestions"
+            f"Generated {len(self.suggestions)} match suggestions"
         )
 
     def _on_search(self, event=None):
@@ -773,6 +783,18 @@ class ReconciliationGUI:
         self.search_matches = []
         self.search_index = 0
         self.search_result_label.config(text="")
+
+    def _on_show_all_changed(self):
+        """Handle show all transactions checkbox change."""
+        self._apply_queued_changes()
+        self.system.save_state()
+
+        # Regenerate suggestions with new setting
+        include_confirmed = self.show_all_var.get()
+        self.suggestions = self.system.generate_suggestions(include_confirmed=include_confirmed)
+        self.current_index = 0
+
+        self._update_display()
 
 
 def main():
