@@ -524,6 +524,11 @@ class ReconciliationGUI:
             command=self._on_refresh
         ).pack(side=tk.LEFT, padx=5)
 
+        ttk.Button(
+            action_row, text="Auto-Confirm",
+            command=self._on_auto_confirm
+        ).pack(side=tk.LEFT, padx=5)
+
         # Row 3: Consistency check controls
         consistency_row = ttk.Frame(action_frame)
         consistency_row.pack(fill=tk.X, pady=(5, 0))
@@ -868,6 +873,31 @@ class ReconciliationGUI:
             "Refreshed",
             f"Generated {len(self.suggestions)} match suggestions"
         )
+
+    def _on_auto_confirm(self):
+        """Run auto-confirmation on pending matches."""
+        self._apply_queued_changes()
+
+        # Run auto-confirmation
+        count = self.system.run_auto_confirm()
+
+        if count > 0:
+            # Save state after auto-confirmation
+            self.system.save_state()
+
+            # Re-sort suggestions to reflect new confirmed status
+            self.system._sort_suggestions()
+
+            self._update_display()
+            messagebox.showinfo(
+                "Auto-Confirm Complete",
+                f"Auto-confirmed {count} high-confidence matches"
+            )
+        else:
+            messagebox.showinfo(
+                "Auto-Confirm Complete",
+                "No matches met the auto-confirmation thresholds"
+            )
 
     def _on_search(self, event=None):
         """Search for matches by description or payee."""

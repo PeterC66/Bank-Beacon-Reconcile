@@ -142,6 +142,13 @@ def test_auto_confirmation(system):
     system.load_data()
     suggestions = system.generate_suggestions()
 
+    # Verify no auto-confirmation happened yet (disabled by default)
+    initially_confirmed = [m for m in suggestions if m.status == MatchStatus.CONFIRMED]
+    assert len(initially_confirmed) == 0, "Auto-confirm should be disabled by default"
+
+    # Now run auto-confirmation explicitly
+    count = system.run_auto_confirm()
+
     # Count auto-confirmed matches
     auto_confirmed = [m for m in suggestions if m.status == MatchStatus.CONFIRMED]
     pending = [m for m in suggestions if m.status == MatchStatus.PENDING]

@@ -446,13 +446,15 @@ class ReconciliationSystem:
 
     def generate_suggestions(self, progress_callback: Callable[[int, int, str], None] = None,
                              include_confirmed: bool = False,
-                             trans_no_limit: int = 5) -> List[MatchSuggestion]:
+                             trans_no_limit: int = 5,
+                             auto_confirm: bool = False) -> List[MatchSuggestion]:
         """Generate match suggestions for bank transactions.
 
         Args:
             progress_callback: Optional callback for progress updates
             include_confirmed: If True, include bank transactions that already have confirmed matches
             trans_no_limit: Maximum difference between trans_no values for 1-to-2 matches
+            auto_confirm: If True, automatically confirm high-confidence matches
         """
         self.progress_callback = progress_callback
         self.trans_no_limit = trans_no_limit
@@ -533,9 +535,10 @@ class ReconciliationSystem:
                 self.match_suggestions.append(suggestion)
                 suggestion_id += 1
 
-        # Auto-confirm high-confidence matches
-        self._report_progress(total_bank, total_bank, "Auto-confirming high-confidence matches...")
-        self._auto_confirm_matches()
+        # Auto-confirm high-confidence matches (only if requested)
+        if auto_confirm:
+            self._report_progress(total_bank, total_bank, "Auto-confirming high-confidence matches...")
+            self._auto_confirm_matches()
 
         # Restore rejected status for previously rejected bank transactions
         self._restore_rejected_status()
@@ -744,8 +747,20 @@ class ReconciliationSystem:
             name_score=name_score
         )
 
-    def _auto_confirm_matches(self):
-        """Auto-confirm matches that exceed confidence thresholds."""
+    def run_auto_confirm(self) -> int:
+        """Run auto-confirmation on pending matches.
+
+        Returns:
+            Number of matches that were auto-confirmed.
+        """
+        return self._auto_confirm_matches()
+
+    def _auto_confirm_matches(self) -> int:
+        """Auto-confirm matches that exceed confidence thresholds.
+
+        Returns:
+            Number of matches that were auto-confirmed.
+        """
         auto_confirmed = 0
 
         for match in self.match_suggestions:
@@ -770,6 +785,8 @@ class ReconciliationSystem:
 
         if auto_confirmed > 0:
             print(f"Auto-confirmed {auto_confirmed} high-confidence matches")
+
+        return auto_confirmed
 
     def _calculate_date_score(self, bank_date: datetime,
                                beacon_date: datetime) -> float:
