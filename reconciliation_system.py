@@ -158,6 +158,7 @@ class ReconciliationSystem:
                  bank_file: str = "Bank_Transactions.csv",
                  beacon_file: str = "Beacon_Entries.csv",
                  state_file: str = "reconciliation_state.json",
+                 member_lookup_file: str = "member_lookup.csv",
                  base_dir: str = None):
         # Use script directory as base if not specified
         if base_dir is None:
@@ -168,12 +169,16 @@ class ReconciliationSystem:
         self.bank_file = os.path.join(base_dir, bank_file) if not os.path.isabs(bank_file) else bank_file
         self.beacon_file = os.path.join(base_dir, beacon_file) if not os.path.isabs(beacon_file) else beacon_file
         self.state_file = os.path.join(base_dir, state_file) if not os.path.isabs(state_file) else state_file
+        self.member_lookup_file = os.path.join(base_dir, member_lookup_file) if not os.path.isabs(member_lookup_file) else member_lookup_file
 
         self.bank_transactions: List[BankTransaction] = []
         self.beacon_entries: List[BeaconEntry] = []
         self.match_suggestions: List[MatchSuggestion] = []
         self.confirmed_matches: List[MatchSuggestion] = []
         self.rejected_matches: List[MatchSuggestion] = []
+
+        # Member lookup dictionary: mem_no -> {status, forename, surname}
+        self.member_lookup: Dict[str, Dict] = {}
 
         # Track which beacon entries are already matched
         self.matched_beacon_ids: set = set()
@@ -191,6 +196,7 @@ class ReconciliationSystem:
         """Load transactions from CSV files."""
         self.bank_transactions = self._load_bank_transactions()
         self.beacon_entries = self._load_beacon_entries()
+        self._load_member_lookup()
         self._load_state()
 
     def _load_bank_transactions(self) -> List[BankTransaction]:
@@ -251,6 +257,93 @@ class ReconciliationSystem:
                     print(f"Warning: Could not parse beacon row {idx}: {e}")
 
         return entries
+
+    def _load_member_lookup(self):
+        """Load member lookup from CSV file."""
+        self.member_lookup = {}
+
+        if not os.path.exists(self.member_lookup_file):
+            print(f"Warning: Member lookup file not found: {self.member_lookup_file}")
+            return
+
+        with open(self.member_lookup_file, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    mem_no = row['mem_no'].strip()
+                    self.member_lookup[mem_no] = {
+                        'status': row['status'].strip(),
+                        'forename': row['forename'].strip(),
+                        'surname': row['surname'].strip()
+                    }
+                except KeyError as e:
+                    print(f"Warning: Could not parse member lookup row: {e}")
+
+        print(f"Loaded {len(self.member_lookup)} member lookup entries")
+
+    def extract_member_numbers(self, description: str) -> List[str]:
+        """Extract all member numbers from a bank description.
+
+        Extracts:
+        - Standalone numbers (e.g., "823", "1783")
+        - Numbers from U3A references (e.g., "U3A1679" -> "1679")
+        - Numbers in patterns like "1786/1785"
+        """
+        import re
+
+        numbers = []
+
+        # Extract numbers from U3A references (e.g., U3A1679)
+        u3a_matches = re.findall(r'u3a(\d+)', description, flags=re.IGNORECASE)
+        numbers.extend(u3a_matches)
+
+        # Extract standalone numbers and slash-separated numbers
+        # First, remove U3A references to avoid double-counting
+        clean_desc = re.sub(r'u3a\d+', '', description, flags=re.IGNORECASE)
+
+        # Find all numbers (including slash-separated like 1786/1785)
+        number_matches = re.findall(r'\b(\d+)\b', clean_desc)
+        numbers.extend(number_matches)
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_numbers = []
+        for num in numbers:
+            if num not in seen:
+                seen.add(num)
+                unique_numbers.append(num)
+
+        return unique_numbers
+
+    def lookup_member(self, mem_no: str) -> Optional[Dict]:
+        """Look up a member by their member number.
+
+        Returns dict with 'status', 'forename', 'surname' if found, else None.
+        """
+        return self.member_lookup.get(mem_no)
+
+    def get_member_lookup_text(self, description: str) -> str:
+        """Get member lookup text for display in GUI.
+
+        Returns formatted text showing member info for all numbers in description.
+        """
+        numbers = self.extract_member_numbers(description)
+
+        if not numbers:
+            return "No mem_no given"
+
+        lines = []
+        for num in numbers:
+            member = self.lookup_member(num)
+            if member:
+                name = f"{member['forename']} {member['surname']}"
+                if member['status'].lower() != 'current':
+                    name += f" ({member['status']})"
+                lines.append(f"Member {num}: {name}")
+            else:
+                lines.append(f"{num} is an unknown mem_no")
+
+        return "\n".join(lines)
 
     def _load_state(self):
         """Load saved state from JSON file."""

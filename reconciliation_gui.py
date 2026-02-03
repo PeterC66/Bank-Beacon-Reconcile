@@ -284,6 +284,16 @@ class ReconciliationGUI:
         self.bank_desc_label = ttk.Label(details_frame, text="", wraplength=350, style='Value.TLabel')
         self.bank_desc_label.grid(row=3, column=1, sticky='w', padx=10, pady=5)
 
+        # Member lookup (based on numbers in description)
+        ttk.Label(details_frame, text="Member:", style='Header.TLabel').grid(
+            row=4, column=0, sticky='nw', pady=5
+        )
+        self.member_lookup_label = ttk.Label(
+            details_frame, text="", wraplength=350,
+            foreground='#006600', justify=tk.LEFT
+        )
+        self.member_lookup_label.grid(row=4, column=1, sticky='w', padx=10, pady=5)
+
         # Amount (prominent)
         amount_frame = ttk.Frame(bank_frame)
         amount_frame.pack(fill=tk.X, pady=(20, 0))
@@ -529,6 +539,10 @@ class ReconciliationGUI:
         self.bank_type_label.config(text=bank.type)
         self.bank_desc_label.config(text=bank.description)
         self.bank_amount_label.config(text=f"£{bank.amount}")
+
+        # Update member lookup
+        member_lookup_text = self.system.get_member_lookup_text(bank.description)
+        self.member_lookup_label.config(text=member_lookup_text)
 
         # Update confidence
         confidence_pct = int(match.confidence_score * 100)
