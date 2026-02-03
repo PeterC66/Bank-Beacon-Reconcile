@@ -793,20 +793,36 @@ class ReconciliationGUI:
     def _apply_queued_changes(self):
         """Apply all queued status changes."""
         changes_made = False
+        updated_match = None  # Track the match we actually updated
+
         for match_id, new_status in self.queued_changes.items():
-            # Find the match
+            # Find the match at current_index first (most likely case)
+            if self.current_index < len(self.suggestions):
+                current = self.suggestions[self.current_index]
+                if current.id == match_id:
+                    self.system.update_match_status(current, new_status)
+                    changes_made = True
+                    updated_match = current
+                    print(f"[DEBUG] Applied {new_status} to {match_id} at current_index {self.current_index}")
+                    continue
+
+            # If not at current_index, search for it
             for match in self.suggestions:
                 if match.id == match_id:
                     self.system.update_match_status(match, new_status)
                     changes_made = True
-                    print(f"[DEBUG] Applied {new_status} to {match_id}")
+                    updated_match = match
+                    print(f"[DEBUG] Applied {new_status} to {match_id} (found by search)")
                     break
 
         self.queued_changes.clear()
 
         # Re-sort suggestions after status changes to maintain correct order
         if changes_made and self.suggestions:
-            current_match = self.suggestions[self.current_index] if self.current_index < len(self.suggestions) else None
+            # Use the match we actually updated, not the one at current_index
+            current_match = updated_match if updated_match else (
+                self.suggestions[self.current_index] if self.current_index < len(self.suggestions) else None
+            )
             old_index = self.current_index
             self.system._sort_suggestions()
             # Try to maintain position on the same match after re-sort
