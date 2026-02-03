@@ -292,7 +292,10 @@ class ReconciliationSystem:
         - Numbers concatenated with text (e.g., "1607HALL" -> "1607", "WHITTINGTON551" -> "551")
         - Numbers separated by AND (e.g., "U3A1076AND1077" -> "1076", "1077")
 
-        Filters out numbers > 10000 as they are not member numbers.
+        Filters out:
+        - Numbers > 10000 as they are not member numbers
+        - Numbers that are part of dates (e.g., "2/12/25", "12/01/2025")
+        - Numbers immediately following "Invoice" or "inv"
         """
         import re
 
@@ -310,6 +313,16 @@ class ReconciliationSystem:
 
         # Remove ALL U3A references (with or without attached numbers) to avoid extracting "3" from "U3A"
         clean_desc = re.sub(r'u3a\d*(?:and\d+)*', '', description, flags=re.IGNORECASE)
+
+        # Remove British dates (e.g., "2/12/25", "12/01/2025", "2-12-25", "12-01-2025")
+        # Pattern matches: d/m/yy, dd/mm/yy, d/m/yyyy, dd/mm/yyyy (with / or - separator)
+        date_pattern = r'\b\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}\b'
+        clean_desc = re.sub(date_pattern, '', clean_desc)
+
+        # Remove invoice numbers (numbers immediately following "Invoice" or "inv")
+        # e.g., "Invoice 12345", "inv12345", "INV 12345"
+        invoice_pattern = r'\b(?:invoice|inv)\s*\d+'
+        clean_desc = re.sub(invoice_pattern, '', clean_desc, flags=re.IGNORECASE)
 
         # Extract all digit sequences (handles concatenated like "1607HALL", "WHITTINGTON551", "1552REA")
         # This finds any sequence of digits, regardless of word boundaries

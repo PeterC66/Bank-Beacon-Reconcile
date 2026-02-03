@@ -265,43 +265,50 @@ class ReconciliationGUI:
         details_frame = ttk.Frame(bank_frame)
         details_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Bank ID
-        ttk.Label(details_frame, text="ID:", style='Header.TLabel').grid(
+        # Match ID
+        ttk.Label(details_frame, text="Match ID:", style='Header.TLabel').grid(
             row=0, column=0, sticky='w', pady=5
         )
+        self.match_id_label = ttk.Label(details_frame, text="", foreground='gray')
+        self.match_id_label.grid(row=0, column=1, sticky='w', padx=10, pady=5)
+
+        # Bank ID
+        ttk.Label(details_frame, text="Bank ID:", style='Header.TLabel').grid(
+            row=1, column=0, sticky='w', pady=5
+        )
         self.bank_id_label = ttk.Label(details_frame, text="", foreground='gray')
-        self.bank_id_label.grid(row=0, column=1, sticky='w', padx=10, pady=5)
+        self.bank_id_label.grid(row=1, column=1, sticky='w', padx=10, pady=5)
 
         # Date
         ttk.Label(details_frame, text="Date:", style='Header.TLabel').grid(
-            row=1, column=0, sticky='w', pady=5
+            row=2, column=0, sticky='w', pady=5
         )
         self.bank_date_label = ttk.Label(details_frame, text="")
-        self.bank_date_label.grid(row=1, column=1, sticky='w', padx=10, pady=5)
+        self.bank_date_label.grid(row=2, column=1, sticky='w', padx=10, pady=5)
 
         # Type
         ttk.Label(details_frame, text="Type:", style='Header.TLabel').grid(
-            row=2, column=0, sticky='w', pady=5
+            row=3, column=0, sticky='w', pady=5
         )
         self.bank_type_label = ttk.Label(details_frame, text="")
-        self.bank_type_label.grid(row=2, column=1, sticky='w', padx=10, pady=5)
+        self.bank_type_label.grid(row=3, column=1, sticky='w', padx=10, pady=5)
 
         # Description
         ttk.Label(details_frame, text="Description:", style='Header.TLabel').grid(
-            row=3, column=0, sticky='w', pady=5
+            row=4, column=0, sticky='w', pady=5
         )
         self.bank_desc_label = ttk.Label(details_frame, text="", wraplength=350, style='Value.TLabel')
-        self.bank_desc_label.grid(row=3, column=1, sticky='w', padx=10, pady=5)
+        self.bank_desc_label.grid(row=4, column=1, sticky='w', padx=10, pady=5)
 
         # Member lookup (based on numbers in description)
         ttk.Label(details_frame, text="Member:", style='Header.TLabel').grid(
-            row=4, column=0, sticky='nw', pady=5
+            row=5, column=0, sticky='nw', pady=5
         )
         self.member_lookup_label = ttk.Label(
             details_frame, text="", wraplength=350,
             foreground='#006600', justify=tk.LEFT
         )
-        self.member_lookup_label.grid(row=4, column=1, sticky='w', padx=10, pady=5)
+        self.member_lookup_label.grid(row=5, column=1, sticky='w', padx=10, pady=5)
 
         # Amount (prominent)
         amount_frame = ttk.Frame(bank_frame)
@@ -383,30 +390,35 @@ class ReconciliationGUI:
         details = ttk.Frame(frame)
         details.pack(fill=tk.X)
 
+        # Beacon ID
+        ttk.Label(details, text="ID:").grid(row=0, column=0, sticky='w', pady=3)
+        widgets['id'] = ttk.Label(details, text="", foreground='gray')
+        widgets['id'].grid(row=0, column=1, sticky='w', padx=10, pady=3)
+
         # Trans No
-        ttk.Label(details, text="Trans No:").grid(row=0, column=0, sticky='w', pady=3)
+        ttk.Label(details, text="Trans No:").grid(row=1, column=0, sticky='w', pady=3)
         widgets['trans_no'] = ttk.Label(details, text="")
-        widgets['trans_no'].grid(row=0, column=1, sticky='w', padx=10, pady=3)
+        widgets['trans_no'].grid(row=1, column=1, sticky='w', padx=10, pady=3)
 
         # Date
-        ttk.Label(details, text="Date:").grid(row=1, column=0, sticky='w', pady=3)
+        ttk.Label(details, text="Date:").grid(row=2, column=0, sticky='w', pady=3)
         widgets['date'] = ttk.Label(details, text="")
-        widgets['date'].grid(row=1, column=1, sticky='w', padx=10, pady=3)
+        widgets['date'].grid(row=2, column=1, sticky='w', padx=10, pady=3)
 
         # Payee
-        ttk.Label(details, text="Payee:").grid(row=2, column=0, sticky='w', pady=3)
+        ttk.Label(details, text="Payee:").grid(row=3, column=0, sticky='w', pady=3)
         widgets['payee'] = ttk.Label(details, text="", wraplength=300, style='Value.TLabel')
-        widgets['payee'].grid(row=2, column=1, sticky='w', padx=10, pady=3)
+        widgets['payee'].grid(row=3, column=1, sticky='w', padx=10, pady=3)
 
         # Detail
-        ttk.Label(details, text="Detail:").grid(row=3, column=0, sticky='w', pady=3)
+        ttk.Label(details, text="Detail:").grid(row=4, column=0, sticky='w', pady=3)
         widgets['detail'] = ttk.Label(details, text="", wraplength=300, style='Value.TLabel')
-        widgets['detail'].grid(row=3, column=1, sticky='w', padx=10, pady=3)
+        widgets['detail'].grid(row=4, column=1, sticky='w', padx=10, pady=3)
 
         # Amount
-        ttk.Label(details, text="Amount:").grid(row=4, column=0, sticky='w', pady=3)
+        ttk.Label(details, text="Amount:").grid(row=5, column=0, sticky='w', pady=3)
         widgets['amount'] = ttk.Label(details, text="£0.00", foreground='#0066CC')
-        widgets['amount'].grid(row=4, column=1, sticky='w', padx=10, pady=3)
+        widgets['amount'].grid(row=5, column=1, sticky='w', padx=10, pady=3)
 
         return widgets
 
@@ -536,9 +548,9 @@ class ReconciliationGUI:
         self.next_issue_button.pack(side=tk.LEFT, padx=5)
 
         self.inconsistency_label = ttk.Label(
-            consistency_row, text="", foreground='gray'
+            consistency_row, text="", foreground='gray', wraplength=500
         )
-        self.inconsistency_label.pack(side=tk.LEFT, padx=10)
+        self.inconsistency_label.pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
 
         # Track inconsistencies
         self.inconsistencies = []  # List of (match, reason) tuples
@@ -584,7 +596,8 @@ class ReconciliationGUI:
         # Update match type
         self.match_type_label.config(text=match.match_type.upper())
 
-        # Update bank transaction details
+        # Update match and bank transaction details
+        self.match_id_label.config(text=match.id)
         bank = match.bank_transaction
         self.bank_id_label.config(text=bank.id)
         self.bank_date_label.config(text=bank.date.strftime('%d-%b-%Y'))
@@ -640,6 +653,7 @@ class ReconciliationGUI:
                 break
 
             widgets = self.beacon_widgets[i]
+            widgets['id'].config(text=beacon.id)
             widgets['trans_no'].config(text=beacon.trans_no)
             widgets['date'].config(text=beacon.date.strftime('%d/%m/%Y'))
             widgets['payee'].config(text=beacon.payee)
@@ -973,8 +987,12 @@ class ReconciliationGUI:
         else:
             count = len(self.inconsistencies)
             current = self.current_inconsistency_index + 1
+            reason = self.inconsistencies[self.current_inconsistency_index][1]
+            # Truncate very long messages
+            if len(reason) > 100:
+                reason = reason[:100] + "..."
             self.inconsistency_label.config(
-                text=f"Issue {current}/{count}: {self.inconsistencies[self.current_inconsistency_index][1]}",
+                text=f"Issue {current}/{count}: {reason}",
                 foreground='red'
             )
             # Enable/disable buttons based on position
@@ -984,6 +1002,8 @@ class ReconciliationGUI:
             self.next_issue_button.config(
                 state=tk.NORMAL if self.current_inconsistency_index < count - 1 else tk.DISABLED
             )
+        # Force UI refresh
+        self.inconsistency_label.update_idletasks()
 
     def _navigate_to_inconsistency(self, index):
         """Navigate to a specific inconsistency by index."""
