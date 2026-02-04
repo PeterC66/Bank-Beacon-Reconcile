@@ -1222,6 +1222,8 @@ class ReconciliationSystem:
         total_checks = len(self.confirmed_matches) * 2  # Two checks per match
         current_check = 0
 
+        print(f"[DEBUG] check_consistency: {len(self.confirmed_matches)} confirmed matches to check")
+
         # Build a map of beacon_id -> list of confirmed matches that include it
         beacon_to_matches: Dict[str, List[MatchSuggestion]] = {}
         for match in self.confirmed_matches:
@@ -1246,6 +1248,9 @@ class ReconciliationSystem:
                 if len(matches_with_beacon) > 1:
                     # This beacon is in multiple confirmed matches
                     match_ids = [m.id for m in matches_with_beacon]
+                    print(f"[DEBUG] Beacon {beacon.id} found in {len(matches_with_beacon)} confirmed matches: {match_ids}")
+                    for m in matches_with_beacon:
+                        print(f"[DEBUG]   - {m.id}: bank={m.bank_transaction.id}, status={m.status}")
                     reason = f"Beacon {beacon.id} ({beacon.payee}, £{beacon.amount}) is confirmed in multiple matches: {', '.join(match_ids)}"
                     # Add each match that shares this beacon as inconsistent
                     # Include all related matches for navigation
@@ -1268,12 +1273,14 @@ class ReconciliationSystem:
             beacon_total = sum(b.amount for b in match.beacon_entries)
 
             if bank_amount != beacon_total:
+                print(f"[DEBUG] Amount mismatch for {match.id}: bank £{bank_amount} != beacon total £{beacon_total}")
                 reason = f"Amount mismatch: Bank £{bank_amount} != Beacon total £{beacon_total}"
                 # Only one match involved in amount mismatch
                 entry = (match, reason, [match])
                 if not any(existing[0].id == match.id and existing[1] == reason for existing in inconsistencies):
                     inconsistencies.append(entry)
 
+        print(f"[DEBUG] check_consistency: found {len(inconsistencies)} inconsistencies")
         return inconsistencies
 
     def find_match_in_suggestions(self, match: 'MatchSuggestion') -> int:
