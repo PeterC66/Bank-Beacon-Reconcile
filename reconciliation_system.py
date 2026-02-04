@@ -449,6 +449,119 @@ class ReconciliationSystem:
         if self.progress_callback:
             self.progress_callback(current, total, message)
 
+    def _find_beacon_by_member_name(self, member_name: str, available_beacon: List[BeaconEntry]) -> List[BeaconEntry]:
+        """Find beacon entries where member_1 matches the given member name.
+
+        Args:
+            member_name: The name to match (forename+surname concatenated, no space)
+            available_beacon: List of available beacon entries
+
+        Returns:
+            List of matching beacon entries (up to 10)
+        """
+        matches = []
+        member_name_upper = member_name.upper()
+
+        for beacon in available_beacon:
+            # Check member_1 field in raw_data
+            member_1 = beacon.raw_data.get('member_1', '').strip()
+            if member_1:
+                # Remove spaces for comparison
+                member_1_clean = member_1.replace(' ', '').upper()
+                if member_1_clean == member_name_upper:
+                    matches.append(beacon)
+                    if len(matches) >= 10:
+                        break
+
+        return matches
+
+    def _generate_member_number_matches(self, bank_to_process: List[BankTransaction],
+                                         available_beacon: List[BeaconEntry],
+                                         suggestion_id: int) -> tuple:
+        """Generate matches based on member numbers in bank descriptions.
+
+        This is the first matching step that:
+        a) If bank has 1 valid member number: generate 1-to-1 matches
+        b) If bank has 2 valid member numbers: generate 1-to-2 matches
+
+        Returns:
+            Tuple of (matched_bank_ids, new_suggestion_id)
+        """
+        matched_bank_ids = set()
+
+        for bank_txn in bank_to_process:
+            # Extract member numbers from description
+            member_numbers = self.extract_member_numbers(bank_txn.description)
+
+            # Filter to valid member numbers (ones that exist in lookup)
+            valid_numbers = [n for n in member_numbers if self.lookup_member(n) is not None]
+
+            if not valid_numbers:
+                continue
+
+            # Get member names for each valid number
+            member_names = []
+            for num in valid_numbers[:2]:  # Only use first 2 valid numbers
+                member = self.lookup_member(num)
+                if member:
+                    # Concatenate forename+surname without space
+                    full_name = member['forename'] + member['surname']
+                    member_names.append((num, full_name))
+
+            if len(member_names) == 1:
+                # 1-to-1 match: find beacon entries for this member
+                num, name = member_names[0]
+                matching_beacons = self._find_beacon_by_member_name(name, available_beacon)
+
+                # Generate a suggestion for each matching beacon
+                for beacon in matching_beacons:
+                    if beacon.amount == bank_txn.amount:
+                        match = MatchSuggestion(
+                            id=f"MATCH_{suggestion_id:04d}",
+                            bank_transaction=bank_txn,
+                            beacon_entries=[beacon],
+                            confidence_score=0.95,  # High confidence for member number match
+                            match_type="1-to-1",
+                            amount_score=1.0,
+                            date_score=0.5,  # Date not checked here
+                            name_score=1.0
+                        )
+                        self.match_suggestions.append(match)
+                        suggestion_id += 1
+                        matched_bank_ids.add(bank_txn.id)
+
+            elif len(member_names) >= 2:
+                # 1-to-2 match: find beacon entries for both members
+                num1, name1 = member_names[0]
+                num2, name2 = member_names[1]
+
+                beacons1 = self._find_beacon_by_member_name(name1, available_beacon)
+                beacons2 = self._find_beacon_by_member_name(name2, available_beacon)
+
+                # Try to find a pair that sums to the bank amount
+                for b1 in beacons1:
+                    for b2 in beacons2:
+                        if b1.id != b2.id and b1.amount + b2.amount == bank_txn.amount:
+                            match = MatchSuggestion(
+                                id=f"MATCH_{suggestion_id:04d}",
+                                bank_transaction=bank_txn,
+                                beacon_entries=[b1, b2],
+                                confidence_score=0.95,  # High confidence for member number match
+                                match_type="1-to-2",
+                                amount_score=1.0,
+                                date_score=0.5,
+                                name_score=1.0
+                            )
+                            self.match_suggestions.append(match)
+                            suggestion_id += 1
+                            matched_bank_ids.add(bank_txn.id)
+                            break
+                    else:
+                        continue
+                    break
+
+        return matched_bank_ids, suggestion_id
+
     def generate_suggestions(self, progress_callback: Callable[[int, int, str], None] = None,
                              include_confirmed: bool = False,
                              trans_no_limit: int = 5,
@@ -490,13 +603,23 @@ class ReconciliationSystem:
                     self.match_suggestions.append(match)
             return self._sort_suggestions()
 
+        # Step 1: Generate member number matches first
+        self._report_progress(0, total_bank, "Matching by member numbers...")
+        memno_matched_bank_ids, suggestion_id = self._generate_member_number_matches(
+            bank_to_process, available_beacon, suggestion_id
+        )
+
         # Build index for fast lookups
         self._report_progress(0, total_bank, "Building index...")
         self._build_beacon_index(available_beacon)
 
-        # Process each bank transaction
+        # Step 2: Process remaining bank transactions (excluding those matched by member number)
         for idx, bank_txn in enumerate(bank_to_process):
             self._report_progress(idx + 1, total_bank, f"Processing {bank_txn.description[:20]}...")
+
+            # Skip if already matched by member number
+            if bank_txn.id in memno_matched_bank_ids:
+                continue
 
             # Check if this bank transaction already has a confirmed match
             if bank_txn.id in confirmed_bank_ids:
@@ -1556,6 +1679,42 @@ class ReconciliationSystem:
                     str(beacon.amount),
                     mem_no,
                     beacon.detail
+                ])
+
+        return len(unmatched)
+
+    def get_unmatched_bank_transactions(self) -> List[BankTransaction]:
+        """Get all bank transactions that are not matched to any beacon entries."""
+        # Build set of matched bank transaction IDs
+        matched_bank_ids = set()
+        for match in self.confirmed_matches:
+            if match.status in (MatchStatus.CONFIRMED, MatchStatus.MANUAL_MATCH,
+                               MatchStatus.MANUALLY_RESOLVED):
+                matched_bank_ids.add(match.bank_transaction.id)
+
+        return [b for b in self.bank_transactions if b.id not in matched_bank_ids]
+
+    def export_unmatched_bank_csv(self, filepath: str) -> int:
+        """Export unmatched bank transactions to CSV.
+
+        Returns the number of rows written.
+        """
+        import csv
+
+        unmatched = self.get_unmatched_bank_transactions()
+
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            # Header
+            writer.writerow(['bank_id', 'date', 'type', 'description', 'amount'])
+
+            for bank in unmatched:
+                writer.writerow([
+                    bank.id,
+                    bank.date.strftime('%d/%m/%Y'),
+                    bank.type,
+                    bank.description,
+                    str(bank.amount)
                 ])
 
         return len(unmatched)

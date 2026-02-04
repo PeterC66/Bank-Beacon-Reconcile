@@ -793,8 +793,8 @@ class ReconciliationGUI:
         # Show additional entries indicator if more than 2
         if len(match.beacon_entries) > 2:
             extra_entries = match.beacon_entries[2:]
-            extra_amounts = [f"£{b.amount}" for b in extra_entries]
-            extra_text = f"+ {len(extra_entries)} more: {', '.join(extra_amounts)}"
+            extra_details = [f"{b.trans_no} (£{b.amount})" for b in extra_entries]
+            extra_text = f"+ {len(extra_entries)} more: {', '.join(extra_details)}"
             self.additional_entries_label.config(text=extra_text)
             self.additional_entries_label.pack(fill=tk.X, pady=(0, 5))
 
@@ -1408,7 +1408,6 @@ class ReconciliationGUI:
                 self.suggestions[self.current_index] = match
             # Refresh display
             self._update_display()
-            self._update_stats()
         else:
             messagebox.showerror("Error", message)
 
@@ -1447,13 +1446,11 @@ class ReconciliationGUI:
                 self.suggestions[self.current_index] = match
             # Refresh display
             self._update_display()
-            self._update_stats()
         else:
             messagebox.showerror("Error", message)
 
     def _on_export_csvs(self):
         """Export matched and unmatched CSVs."""
-        from tkinter import filedialog
         import os
 
         # Get base directory for saving
@@ -1464,15 +1461,21 @@ class ReconciliationGUI:
         matched_count = self.system.export_matched_csv(matched_path)
 
         # Export unmatched beacon CSV
-        unmatched_path = os.path.join(base_dir, "unmatched_beacons.csv")
-        unmatched_count = self.system.export_unmatched_beacon_csv(unmatched_path)
+        unmatched_beacon_path = os.path.join(base_dir, "unmatched_beacons.csv")
+        unmatched_beacon_count = self.system.export_unmatched_beacon_csv(unmatched_beacon_path)
+
+        # Export unmatched bank CSV
+        unmatched_bank_path = os.path.join(base_dir, "unmatched_bank.csv")
+        unmatched_bank_count = self.system.export_unmatched_bank_csv(unmatched_bank_path)
 
         messagebox.showinfo("Export Complete",
             f"Exported:\n\n"
             f"1. Matched transactions: {matched_count} rows\n"
             f"   → {matched_path}\n\n"
-            f"2. Unmatched beacons: {unmatched_count} rows\n"
-            f"   → {unmatched_path}")
+            f"2. Unmatched beacons: {unmatched_beacon_count} rows\n"
+            f"   → {unmatched_beacon_path}\n\n"
+            f"3. Unmatched bank: {unmatched_bank_count} rows\n"
+            f"   → {unmatched_bank_path}")
 
 
 def main():
