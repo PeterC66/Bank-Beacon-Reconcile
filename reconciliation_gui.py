@@ -29,6 +29,8 @@ class ReconciliationGUI:
         MatchStatus.CONFIRMED: '#D4EDDA',    # Green
         MatchStatus.REJECTED: '#F8D7DA',     # Red/pink
         MatchStatus.SKIPPED: '#D1ECF1',      # Blue/cyan
+        MatchStatus.MANUAL_MATCH: '#C3E6CB', # Darker green for manual
+        MatchStatus.MANUALLY_RESOLVED: '#B8DAFF', # Blue for resolved
         'no-match': '#E2E3E5',               # Gray
     }
 
@@ -37,6 +39,8 @@ class ReconciliationGUI:
         MatchStatus.CONFIRMED: '✓ CONFIRMED',
         MatchStatus.REJECTED: '✗ REJECTED',
         MatchStatus.SKIPPED: '⏭ SKIPPED',
+        MatchStatus.MANUAL_MATCH: '⚡ MANUAL MATCH',
+        MatchStatus.MANUALLY_RESOLVED: '📋 MANUALLY RESOLVED',
     }
 
     def __init__(self, master: tk.Tk):
@@ -582,6 +586,41 @@ class ReconciliationGUI:
         self.current_inconsistency_index = 0
         self.current_related_index = 0  # Index within related_matches
 
+        # Row 4: Manual matching controls
+        manual_row = ttk.Frame(action_frame)
+        manual_row.pack(fill=tk.X, pady=(5, 0))
+
+        ttk.Label(manual_row, text="Manual Match - Trans_no(s):").pack(side=tk.LEFT, padx=5)
+        self.trans_no_entry = ttk.Entry(manual_row, width=30)
+        self.trans_no_entry.pack(side=tk.LEFT, padx=5)
+        self.trans_no_entry.bind('<Return>', lambda e: self._on_create_manual_match())
+
+        self.manual_match_button = ttk.Button(
+            manual_row, text="Create Manual Match",
+            command=self._on_create_manual_match
+        )
+        self.manual_match_button.pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(manual_row, text="  |  ").pack(side=tk.LEFT)
+
+        ttk.Label(manual_row, text="Resolved Comment:").pack(side=tk.LEFT, padx=5)
+        self.resolved_comment_entry = ttk.Entry(manual_row, width=25)
+        self.resolved_comment_entry.pack(side=tk.LEFT, padx=5)
+
+        self.mark_resolved_button = ttk.Button(
+            manual_row, text="Mark as Resolved",
+            command=self._on_mark_resolved
+        )
+        self.mark_resolved_button.pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(manual_row, text="  |  ").pack(side=tk.LEFT)
+
+        self.export_csv_button = ttk.Button(
+            manual_row, text="Export CSVs",
+            command=self._on_export_csvs
+        )
+        self.export_csv_button.pack(side=tk.LEFT, padx=5)
+
     def _update_display(self):
         """Update the display for the current match."""
         if not self.suggestions:
@@ -639,16 +678,23 @@ class ReconciliationGUI:
         member_lookup_text = self.system.get_member_lookup_text(bank.description)
         self.member_lookup_label.config(text=member_lookup_text)
 
-        # Update confidence
-        confidence_pct = int(match.confidence_score * 100)
-        self.confidence_label.config(text=f"{confidence_pct}%")
-
-        # Score breakdown
-        self.score_breakdown_label.config(
-            text=f"(Amount: {match.amount_score:.0%} | "
-                 f"Date: {match.date_score:.0%} | "
-                 f"Name: {match.name_score:.0%})"
-        )
+        # Update confidence display
+        if match.match_type == "manual":
+            self.confidence_label.config(text="Manual Match")
+            self.score_breakdown_label.config(text="(Manually matched by user)")
+        elif match.match_type == "resolved":
+            self.confidence_label.config(text="Manually Resolved")
+            comment_text = match.comment[:50] + "..." if len(match.comment) > 50 else match.comment
+            self.score_breakdown_label.config(text=f"Comment: {comment_text}")
+        else:
+            confidence_pct = int(match.confidence_score * 100)
+            self.confidence_label.config(text=f"{confidence_pct}%")
+            # Score breakdown
+            self.score_breakdown_label.config(
+                text=f"(Amount: {match.amount_score:.0%} | "
+                     f"Date: {match.date_score:.0%} | "
+                     f"Name: {match.name_score:.0%})"
+            )
 
         # Update beacon entries display
         self._update_beacon_display(match)
@@ -672,7 +718,11 @@ class ReconciliationGUI:
         self.no_match_label.pack_forget()
 
         if not match.beacon_entries:
-            # No match found
+            # No beacon entries - either no match found or manually resolved
+            if match.match_type == "resolved":
+                self.no_match_label.config(text="Manually Resolved\n\nNo beacon entries linked.\nSee comment for resolution details.")
+            else:
+                self.no_match_label.config(text="No match found\n\nUse manual matching to link\nbeacon entries by trans_no,\nor mark as resolved.")
             self.no_match_label.pack(fill=tk.BOTH, expand=True, pady=50)
             return
 
@@ -1239,6 +1289,119 @@ class ReconciliationGUI:
             print(f"[DEBUG] WARNING: Match {match.id} not found in suggestions!")
 
         self._update_inconsistency_ui()
+
+    def _get_current_bank_transaction(self):
+        """Get the current bank transaction (from match or direct lookup)."""
+        if self.suggestions and self.current_index < len(self.suggestions):
+            return self.suggestions[self.current_index].bank_transaction
+        return None
+
+    def _on_create_manual_match(self):
+        """Create a manual match from trans_no(s) entered by the user."""
+        bank_txn = self._get_current_bank_transaction()
+        if not bank_txn:
+            messagebox.showerror("Error", "No bank transaction selected")
+            return
+
+        # Check if this bank transaction is already matched
+        if self.suggestions and self.current_index < len(self.suggestions):
+            match = self.suggestions[self.current_index]
+            if match.status in (MatchStatus.CONFIRMED, MatchStatus.MANUAL_MATCH,
+                               MatchStatus.MANUALLY_RESOLVED):
+                messagebox.showerror("Error",
+                    f"This bank transaction is already {match.status.value}.\n"
+                    "Use Reject first if you want to change it.")
+                return
+
+        # Get trans_nos from entry
+        trans_no_text = self.trans_no_entry.get().strip()
+        if not trans_no_text:
+            messagebox.showerror("Error", "Please enter one or more trans_no values (comma-separated)")
+            return
+
+        # Parse trans_nos
+        trans_nos = [t.strip() for t in trans_no_text.split(',') if t.strip()]
+        if not trans_nos:
+            messagebox.showerror("Error", "Please enter valid trans_no values")
+            return
+
+        # Create the manual match
+        success, message, match = self.system.create_manual_match(bank_txn, trans_nos)
+
+        if success:
+            messagebox.showinfo("Success", message)
+            # Clear the entry
+            self.trans_no_entry.delete(0, tk.END)
+            # Update the current match in suggestions if it exists
+            if self.suggestions and self.current_index < len(self.suggestions):
+                self.suggestions[self.current_index] = match
+            # Refresh display
+            self._update_display()
+            self._update_stats()
+        else:
+            messagebox.showerror("Error", message)
+
+    def _on_mark_resolved(self):
+        """Mark the current bank transaction as manually resolved."""
+        bank_txn = self._get_current_bank_transaction()
+        if not bank_txn:
+            messagebox.showerror("Error", "No bank transaction selected")
+            return
+
+        # Check if this bank transaction is already matched
+        if self.suggestions and self.current_index < len(self.suggestions):
+            match = self.suggestions[self.current_index]
+            if match.status in (MatchStatus.CONFIRMED, MatchStatus.MANUAL_MATCH,
+                               MatchStatus.MANUALLY_RESOLVED):
+                messagebox.showerror("Error",
+                    f"This bank transaction is already {match.status.value}.\n"
+                    "Use Reject first if you want to change it.")
+                return
+
+        # Get comment from entry
+        comment = self.resolved_comment_entry.get().strip()
+        if not comment:
+            messagebox.showerror("Error", "Please enter a comment explaining how this was resolved")
+            return
+
+        # Create the manually resolved entry
+        success, message, match = self.system.create_manually_resolved(bank_txn, comment)
+
+        if success:
+            messagebox.showinfo("Success", message)
+            # Clear the entry
+            self.resolved_comment_entry.delete(0, tk.END)
+            # Update the current match in suggestions if it exists
+            if self.suggestions and self.current_index < len(self.suggestions):
+                self.suggestions[self.current_index] = match
+            # Refresh display
+            self._update_display()
+            self._update_stats()
+        else:
+            messagebox.showerror("Error", message)
+
+    def _on_export_csvs(self):
+        """Export matched and unmatched CSVs."""
+        from tkinter import filedialog
+        import os
+
+        # Get base directory for saving
+        base_dir = self.system.base_dir
+
+        # Export matched CSV
+        matched_path = os.path.join(base_dir, "matched_transactions.csv")
+        matched_count = self.system.export_matched_csv(matched_path)
+
+        # Export unmatched beacon CSV
+        unmatched_path = os.path.join(base_dir, "unmatched_beacons.csv")
+        unmatched_count = self.system.export_unmatched_beacon_csv(unmatched_path)
+
+        messagebox.showinfo("Export Complete",
+            f"Exported:\n\n"
+            f"1. Matched transactions: {matched_count} rows\n"
+            f"   → {matched_path}\n\n"
+            f"2. Unmatched beacons: {unmatched_count} rows\n"
+            f"   → {unmatched_path}")
 
 
 def main():

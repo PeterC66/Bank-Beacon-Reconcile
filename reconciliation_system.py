@@ -30,6 +30,8 @@ class MatchStatus(Enum):
     CONFIRMED = "confirmed"
     REJECTED = "rejected"
     SKIPPED = "skipped"
+    MANUAL_MATCH = "manual_match"
+    MANUALLY_RESOLVED = "manually_resolved"
 
 
 @dataclass
@@ -105,13 +107,14 @@ class MatchSuggestion:
     """Represents a suggested match between bank and beacon transactions."""
     id: str
     bank_transaction: BankTransaction
-    beacon_entries: List[BeaconEntry]  # 1 or 2 entries
+    beacon_entries: List[BeaconEntry]  # 1 or more entries (can be empty for manually_resolved)
     confidence_score: float
-    match_type: str  # "1-to-1" or "1-to-2"
+    match_type: str  # "1-to-1", "1-to-2", "manual", or "resolved"
     status: MatchStatus = MatchStatus.PENDING
     amount_score: float = 0.0
     date_score: float = 0.0
     name_score: float = 0.0
+    comment: str = ""  # Optional comment for manually resolved items
 
     def to_dict(self) -> Dict:
         return {
@@ -123,7 +126,8 @@ class MatchSuggestion:
             'status': self.status.value,
             'amount_score': self.amount_score,
             'date_score': self.date_score,
-            'name_score': self.name_score
+            'name_score': self.name_score,
+            'comment': self.comment
         }
 
     @classmethod
@@ -137,7 +141,8 @@ class MatchSuggestion:
             status=MatchStatus(data['status']),
             amount_score=data.get('amount_score', 0.0),
             date_score=data.get('date_score', 0.0),
-            name_score=data.get('name_score', 0.0)
+            name_score=data.get('name_score', 0.0),
+            comment=data.get('comment', '')
         )
 
 
@@ -1092,6 +1097,18 @@ class ReconciliationSystem:
             print(f"[DEBUG]   -> undo_confirmation")
             self.undo_confirmation(match)
 
+        # If changing from manual match, undo similarly (unmark beacons)
+        if old_status == MatchStatus.MANUAL_MATCH and new_status != MatchStatus.MANUAL_MATCH:
+            print(f"[DEBUG]   -> undo manual match")
+            self.undo_confirmation(match)  # Same logic as confirmed
+
+        # If changing from manually resolved, remove from confirmed
+        if old_status == MatchStatus.MANUALLY_RESOLVED and new_status != MatchStatus.MANUALLY_RESOLVED:
+            print(f"[DEBUG]   -> undo manually resolved")
+            if match in self.confirmed_matches:
+                self.confirmed_matches.remove(match)
+            match.status = MatchStatus.PENDING
+
         # If changing from rejected, undo the rejection first
         if old_status == MatchStatus.REJECTED and new_status != MatchStatus.REJECTED:
             print(f"[DEBUG]   -> undo_rejection")
@@ -1117,7 +1134,15 @@ class ReconciliationSystem:
         total_bank = len(self.bank_transactions)
         total_beacon = len(self.beacon_entries)
 
-        confirmed = len(self.confirmed_matches)
+        # Count different types of confirmed matches
+        confirmed_auto = len([m for m in self.confirmed_matches
+                             if m.status == MatchStatus.CONFIRMED])
+        manual_matches = len([m for m in self.confirmed_matches
+                             if m.status == MatchStatus.MANUAL_MATCH])
+        manually_resolved = len([m for m in self.confirmed_matches
+                                if m.status == MatchStatus.MANUALLY_RESOLVED])
+        total_confirmed = confirmed_auto + manual_matches + manually_resolved
+
         matched_beacon = len(self.matched_beacon_ids)
 
         pending = len([m for m in self.match_suggestions
@@ -1130,12 +1155,15 @@ class ReconciliationSystem:
         return {
             'total_bank_transactions': total_bank,
             'total_beacon_entries': total_beacon,
-            'confirmed_matches': confirmed,
+            'confirmed_matches': total_confirmed,
+            'auto_confirmed': confirmed_auto,
+            'manual_matches': manual_matches,
+            'manually_resolved': manually_resolved,
             'matched_beacon_entries': matched_beacon,
             'pending_suggestions': pending,
             'rejected_suggestions': rejected,
             'skipped_suggestions': skipped,
-            'unmatched_bank': total_bank - confirmed,
+            'unmatched_bank': total_bank - total_confirmed,
             'unmatched_beacon': total_beacon - matched_beacon
         }
 
@@ -1291,6 +1319,246 @@ class ReconciliationSystem:
 
         print(f"[DEBUG]   NOT FOUND!")
         return -1
+
+    def find_beacon_by_trans_no(self, trans_no: str) -> Optional[BeaconEntry]:
+        """Find a beacon entry by its trans_no.
+
+        Returns the BeaconEntry if found, None otherwise.
+        """
+        for entry in self.beacon_entries:
+            if entry.trans_no == trans_no:
+                return entry
+        return None
+
+    def is_beacon_already_matched(self, trans_no: str) -> bool:
+        """Check if a beacon entry with the given trans_no is already matched."""
+        entry = self.find_beacon_by_trans_no(trans_no)
+        if entry is None:
+            return False
+        return entry.id in self.matched_beacon_ids
+
+    def create_manual_match(self, bank_transaction: BankTransaction,
+                            trans_nos: List[str]) -> tuple:
+        """Create a manual match between a bank transaction and beacon entries.
+
+        Args:
+            bank_transaction: The bank transaction to match
+            trans_nos: List of beacon trans_no values to match
+
+        Returns:
+            Tuple of (success: bool, message: str, match: Optional[MatchSuggestion])
+        """
+        # Validate all trans_nos first
+        beacon_entries = []
+        for trans_no in trans_nos:
+            entry = self.find_beacon_by_trans_no(trans_no)
+            if entry is None:
+                return (False, f"Trans_no '{trans_no}' not found in beacon data", None)
+            if entry.id in self.matched_beacon_ids:
+                return (False, f"Trans_no '{trans_no}' is already matched to another bank transaction", None)
+            beacon_entries.append(entry)
+
+        # Check amount consistency
+        beacon_total = sum(e.amount for e in beacon_entries)
+        if bank_transaction.amount != beacon_total:
+            return (False,
+                    f"Amount mismatch: Bank £{bank_transaction.amount} != Beacon total £{beacon_total}",
+                    None)
+
+        # Create the manual match
+        match_id = f"MANUAL_{bank_transaction.id}"
+        match = MatchSuggestion(
+            id=match_id,
+            bank_transaction=bank_transaction,
+            beacon_entries=beacon_entries,
+            confidence_score=1.0,  # Manual matches are fully confident
+            match_type="manual",
+            status=MatchStatus.MANUAL_MATCH,
+            amount_score=1.0,
+            date_score=1.0,
+            name_score=1.0
+        )
+
+        # Mark beacon entries as matched
+        for entry in beacon_entries:
+            entry.matched = True
+            self.matched_beacon_ids.add(entry.id)
+
+        # Add to confirmed matches
+        self.confirmed_matches.append(match)
+
+        # Save state
+        self.save_state()
+
+        return (True, f"Manual match created with {len(beacon_entries)} beacon entries", match)
+
+    def create_manually_resolved(self, bank_transaction: BankTransaction,
+                                  comment: str) -> tuple:
+        """Mark a bank transaction as manually resolved.
+
+        Args:
+            bank_transaction: The bank transaction to mark as resolved
+            comment: Explanation of how it was resolved
+
+        Returns:
+            Tuple of (success: bool, message: str, match: Optional[MatchSuggestion])
+        """
+        # Create the manually resolved entry
+        match_id = f"RESOLVED_{bank_transaction.id}"
+        match = MatchSuggestion(
+            id=match_id,
+            bank_transaction=bank_transaction,
+            beacon_entries=[],  # No beacon entries for manually resolved
+            confidence_score=1.0,
+            match_type="resolved",
+            status=MatchStatus.MANUALLY_RESOLVED,
+            comment=comment
+        )
+
+        # Add to confirmed matches
+        self.confirmed_matches.append(match)
+
+        # Save state
+        self.save_state()
+
+        return (True, "Bank transaction marked as manually resolved", match)
+
+    def get_all_bank_transactions_with_status(self) -> List[tuple]:
+        """Get all bank transactions with their match status.
+
+        Returns a list of (bank_transaction, status, match) tuples where:
+        - status is 'matched', 'manual_match', 'resolved', or 'unmatched'
+        - match is the MatchSuggestion if matched, else None
+        """
+        result = []
+
+        # Build lookup of bank transactions that have matches
+        matched_bank_ids = {}
+        for match in self.confirmed_matches:
+            if match.status in (MatchStatus.CONFIRMED, MatchStatus.MANUAL_MATCH,
+                               MatchStatus.MANUALLY_RESOLVED):
+                matched_bank_ids[match.bank_transaction.id] = match
+
+        for bank_txn in self.bank_transactions:
+            if bank_txn.id in matched_bank_ids:
+                match = matched_bank_ids[bank_txn.id]
+                if match.status == MatchStatus.MANUAL_MATCH:
+                    result.append((bank_txn, 'manual_match', match))
+                elif match.status == MatchStatus.MANUALLY_RESOLVED:
+                    result.append((bank_txn, 'resolved', match))
+                else:
+                    result.append((bank_txn, 'matched', match))
+            else:
+                result.append((bank_txn, 'unmatched', None))
+
+        return result
+
+    def get_unmatched_beacon_entries(self) -> List[BeaconEntry]:
+        """Get all beacon entries that are not matched to any bank transaction."""
+        return [e for e in self.beacon_entries if e.id not in self.matched_beacon_ids]
+
+    def export_matched_csv(self, filepath: str) -> int:
+        """Export matched bank transactions to CSV.
+
+        Format: Bank fields + Beacon fields (one row per beacon entry).
+        Manually resolved entries have empty beacon fields but include comment.
+
+        Returns the number of rows written.
+        """
+        import csv
+
+        rows_written = 0
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            # Header
+            writer.writerow([
+                'bank_id', 'bank_date', 'bank_description', 'bank_amount',
+                'beacon_trans_no', 'beacon_date', 'beacon_payee', 'beacon_amount',
+                'beacon_mem_no', 'match_type', 'comment'
+            ])
+
+            # Get all matched bank transactions in bank transaction order
+            for bank_txn, status, match in self.get_all_bank_transactions_with_status():
+                if status == 'unmatched':
+                    continue
+
+                if match.beacon_entries:
+                    # One row per beacon entry
+                    for beacon in match.beacon_entries:
+                        # Extract mem_no from beacon detail or payee if available
+                        mem_no = self._extract_mem_no_from_beacon(beacon)
+                        writer.writerow([
+                            bank_txn.id,
+                            bank_txn.date.strftime('%d/%m/%Y'),
+                            bank_txn.description,
+                            str(bank_txn.amount),
+                            beacon.trans_no,
+                            beacon.date.strftime('%d/%m/%Y'),
+                            beacon.payee,
+                            str(beacon.amount),
+                            mem_no,
+                            match.match_type,
+                            match.comment
+                        ])
+                        rows_written += 1
+                else:
+                    # Manually resolved - no beacon entries
+                    writer.writerow([
+                        bank_txn.id,
+                        bank_txn.date.strftime('%d/%m/%Y'),
+                        bank_txn.description,
+                        str(bank_txn.amount),
+                        '', '', '', '', '',  # Empty beacon fields
+                        match.match_type,
+                        match.comment
+                    ])
+                    rows_written += 1
+
+        return rows_written
+
+    def _extract_mem_no_from_beacon(self, beacon: BeaconEntry) -> str:
+        """Extract member number from beacon entry if available."""
+        # Try to extract from detail field
+        import re
+        # Look for patterns like "member_1: 1234" or just numbers in detail
+        match = re.search(r'member_1[:\s]+(\d+)', beacon.detail, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+        # Try raw_data if available
+        if beacon.raw_data:
+            mem_no = beacon.raw_data.get('member_1', '')
+            if mem_no:
+                return str(mem_no)
+
+        return ''
+
+    def export_unmatched_beacon_csv(self, filepath: str) -> int:
+        """Export unmatched beacon entries to CSV.
+
+        Returns the number of rows written.
+        """
+        import csv
+
+        unmatched = self.get_unmatched_beacon_entries()
+
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            # Header
+            writer.writerow(['trans_no', 'date', 'payee', 'amount', 'mem_no', 'detail'])
+
+            for beacon in unmatched:
+                mem_no = self._extract_mem_no_from_beacon(beacon)
+                writer.writerow([
+                    beacon.trans_no,
+                    beacon.date.strftime('%d/%m/%Y'),
+                    beacon.payee,
+                    str(beacon.amount),
+                    mem_no,
+                    beacon.detail
+                ])
+
+        return len(unmatched)
 
 
 def main():
