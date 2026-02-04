@@ -171,9 +171,45 @@ class ReconciliationGUI:
 
     def _create_widgets(self):
         """Create all GUI widgets."""
-        # Main container
-        main_frame = ttk.Frame(self.master, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        # Create outer frame for canvas and scrollbar
+        outer_frame = ttk.Frame(self.master)
+        outer_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Create canvas with scrollbar
+        self.canvas = tk.Canvas(outer_frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(outer_frame, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Create main frame inside canvas
+        main_frame = ttk.Frame(self.canvas, padding="10")
+        self.canvas_window = self.canvas.create_window((0, 0), window=main_frame, anchor="nw")
+
+        # Configure canvas scrolling
+        def configure_scroll(event):
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+        def configure_canvas_width(event):
+            self.canvas.itemconfig(self.canvas_window, width=event.width)
+
+        main_frame.bind("<Configure>", configure_scroll)
+        self.canvas.bind("<Configure>", configure_canvas_width)
+
+        # Enable mousewheel scrolling
+        def on_mousewheel(event):
+            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def on_mousewheel_linux(event):
+            if event.num == 4:
+                self.canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                self.canvas.yview_scroll(1, "units")
+
+        self.canvas.bind_all("<MouseWheel>", on_mousewheel)  # Windows/Mac
+        self.canvas.bind_all("<Button-4>", on_mousewheel_linux)  # Linux scroll up
+        self.canvas.bind_all("<Button-5>", on_mousewheel_linux)  # Linux scroll down
 
         # Top section: Statistics and progress
         self._create_stats_section(main_frame)
@@ -365,12 +401,21 @@ class ReconciliationGUI:
         )
         self.beacon_total_label.pack(side=tk.LEFT, padx=10)
 
+        # Additional entries indicator (for manual matches with >2 entries)
+        self.additional_entries_label = ttk.Label(
+            beacon_frame,
+            text="",
+            font=('Segoe UI', 10, 'italic'),
+            foreground='#666666'
+        )
+
         # No match message
         self.no_match_label = ttk.Label(
             beacon_frame,
             text="No matching Beacon entries found",
-            font=('Segoe UI', 11, 'italic'),
-            foreground='gray'
+            font=('Segoe UI', 10),
+            foreground='gray',
+            justify='center'
         )
 
     def _create_beacon_entry_widgets(self, frame, entry_num):
@@ -715,6 +760,7 @@ class ReconciliationGUI:
         for frame in self.beacon_frames:
             frame.pack_forget()
         self.total_frame.pack_forget()
+        self.additional_entries_label.pack_forget()
         self.no_match_label.pack_forget()
 
         if not match.beacon_entries:
@@ -722,16 +768,15 @@ class ReconciliationGUI:
             if match.match_type == "resolved":
                 self.no_match_label.config(text="Manually Resolved\n\nNo beacon entries linked.\nSee comment for resolution details.")
             else:
-                self.no_match_label.config(text="No match found\n\nUse manual matching to link\nbeacon entries by trans_no,\nor mark as resolved.")
-            self.no_match_label.pack(fill=tk.BOTH, expand=True, pady=50)
+                self.no_match_label.config(text="No match found\n\nUse manual matching to link beacon entries by trans_no,\nor mark as resolved.")
+            self.no_match_label.pack(fill=tk.X, pady=(10, 0))
             return
 
-        # Show beacon entries
+        # Show first 2 beacon entries
         total_amount = 0
-        for i, beacon in enumerate(match.beacon_entries):
-            if i >= 2:
-                break
-
+        displayed_count = min(2, len(match.beacon_entries))
+        for i in range(displayed_count):
+            beacon = match.beacon_entries[i]
             widgets = self.beacon_widgets[i]
             widgets['id'].config(text=beacon.id)
             widgets['trans_no'].config(text=beacon.trans_no)
@@ -741,10 +786,20 @@ class ReconciliationGUI:
             widgets['amount'].config(text=f"£{beacon.amount}")
 
             self.beacon_frames[i].pack(fill=tk.X, pady=(0, 10))
-            total_amount += float(beacon.amount)
 
-        # Show total for 1-to-2 matches
-        if len(match.beacon_entries) == 2:
+        # Calculate total from ALL beacon entries
+        total_amount = sum(float(b.amount) for b in match.beacon_entries)
+
+        # Show additional entries indicator if more than 2
+        if len(match.beacon_entries) > 2:
+            extra_entries = match.beacon_entries[2:]
+            extra_amounts = [f"£{b.amount}" for b in extra_entries]
+            extra_text = f"+ {len(extra_entries)} more: {', '.join(extra_amounts)}"
+            self.additional_entries_label.config(text=extra_text)
+            self.additional_entries_label.pack(fill=tk.X, pady=(0, 5))
+
+        # Show total for matches with 2+ entries
+        if len(match.beacon_entries) >= 2:
             self.beacon_total_label.config(text=f"£{total_amount:.2f}")
             self.total_frame.pack(fill=tk.X, pady=(10, 0))
 
@@ -839,6 +894,9 @@ class ReconciliationGUI:
         match = self.suggestions[self.current_index]
         print(f"[DEBUG] Rejecting match {match.id}, was status={match.status}")
 
+        # Remember the bank transaction ID before rejecting
+        rejected_bank_id = match.bank_transaction.id
+
         self.queued_changes[match.id] = MatchStatus.REJECTED
         self._auto_save()
 
@@ -853,9 +911,22 @@ class ReconciliationGUI:
             self.inconsistencies = self.system.check_consistency()
             self._update_inconsistency_ui()
 
-        # Auto-advance (but not when show_all is enabled)
+        # Auto-advance: first look for another match for the same bank transaction
         if not self.show_all_var.get() and self.current_index < len(self.suggestions) - 1:
-            self._on_next()
+            # Look for next pending match with same bank transaction
+            found_same_bank = False
+            for i in range(self.current_index + 1, len(self.suggestions)):
+                candidate = self.suggestions[i]
+                if candidate.bank_transaction.id == rejected_bank_id:
+                    if candidate.status == MatchStatus.PENDING:
+                        self.current_index = i
+                        found_same_bank = True
+                        self._update_display()
+                        break
+
+            # If no other match for same bank, advance normally
+            if not found_same_bank:
+                self._on_next()
 
     def _on_skip(self):
         """Skip the current match."""
