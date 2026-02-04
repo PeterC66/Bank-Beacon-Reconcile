@@ -1257,13 +1257,12 @@ class ReconciliationSystem:
                     for m in matches_with_beacon:
                         print(f"[DEBUG]   - {m.id}: bank={m.bank_transaction.id}, status={m.status}")
                     reason = f"Beacon {beacon.id} ({beacon.payee}, £{beacon.amount}) is confirmed in multiple matches: {', '.join(match_ids)}"
-                    # Add each match that shares this beacon as inconsistent
+                    # Add ONE entry per beacon issue (use first match as primary)
                     # Include all related matches for navigation
-                    for m in matches_with_beacon:
-                        entry = (m, reason, matches_with_beacon)
-                        # Check if this match is already in inconsistencies
-                        if not any(existing[0].id == m.id and existing[1] == reason for existing in inconsistencies):
-                            inconsistencies.append(entry)
+                    entry = (matches_with_beacon[0], reason, matches_with_beacon)
+                    # Check if this exact entry is already in inconsistencies
+                    if not any(existing[0].id == entry[0].id and existing[1] == reason for existing in inconsistencies):
+                        inconsistencies.append(entry)
 
         # Check 2: Bank amount should equal sum of beacon amounts
         for match in actually_confirmed:

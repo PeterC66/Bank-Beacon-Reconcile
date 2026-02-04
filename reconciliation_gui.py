@@ -772,6 +772,11 @@ class ReconciliationGUI:
 
         self._update_display()
 
+        # Refresh inconsistency check if we were viewing inconsistencies
+        if self.inconsistencies:
+            self.inconsistencies = self.system.check_consistency()
+            self._update_inconsistency_ui()
+
         # Auto-advance to next (but not when show_all is enabled - let user see status change)
         if not self.show_all_var.get() and self.current_index < len(self.suggestions) - 1:
             self._on_next()
@@ -792,6 +797,11 @@ class ReconciliationGUI:
         print(f"[DEBUG] After reject: match {current_match.id}, now status={current_match.status}")
 
         self._update_display()
+
+        # Refresh inconsistency check if we were viewing inconsistencies
+        if self.inconsistencies:
+            self.inconsistencies = self.system.check_consistency()
+            self._update_inconsistency_ui()
 
         # Auto-advance (but not when show_all is enabled)
         if not self.show_all_var.get() and self.current_index < len(self.suggestions) - 1:
