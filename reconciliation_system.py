@@ -1219,14 +1219,19 @@ class ReconciliationSystem:
         2. Each confirmed match has bank amount = sum of beacon amounts
         """
         inconsistencies = []
-        total_checks = len(self.confirmed_matches) * 2  # Two checks per match
+
+        # Filter to only actually confirmed matches (confirmed_matches list may contain
+        # stale entries due to object identity issues when matches are un-confirmed)
+        actually_confirmed = [m for m in self.confirmed_matches if m.status == MatchStatus.CONFIRMED]
+
+        total_checks = len(actually_confirmed) * 2  # Two checks per match
         current_check = 0
 
-        print(f"[DEBUG] check_consistency: {len(self.confirmed_matches)} confirmed matches to check")
+        print(f"[DEBUG] check_consistency: {len(self.confirmed_matches)} in confirmed_matches list, {len(actually_confirmed)} actually CONFIRMED")
 
         # Build a map of beacon_id -> list of confirmed matches that include it
         beacon_to_matches: Dict[str, List[MatchSuggestion]] = {}
-        for match in self.confirmed_matches:
+        for match in actually_confirmed:
             for beacon in match.beacon_entries:
                 if beacon.id not in beacon_to_matches:
                     beacon_to_matches[beacon.id] = []
@@ -1234,7 +1239,7 @@ class ReconciliationSystem:
 
         # Check 1: Each beacon should be in at most one confirmed match
         checked_beacons = set()
-        for match in self.confirmed_matches:
+        for match in actually_confirmed:
             current_check += 1
             if progress_callback:
                 progress_callback(current_check, total_checks, "Checking beacon uniqueness...")
@@ -1261,7 +1266,7 @@ class ReconciliationSystem:
                             inconsistencies.append(entry)
 
         # Check 2: Bank amount should equal sum of beacon amounts
-        for match in self.confirmed_matches:
+        for match in actually_confirmed:
             current_check += 1
             if progress_callback:
                 progress_callback(current_check, total_checks, "Checking amount consistency...")
