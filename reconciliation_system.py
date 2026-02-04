@@ -1292,10 +1292,35 @@ class ReconciliationSystem:
         """Find the index of a match in the current suggestions list.
 
         Returns -1 if not found.
+
+        Note: Matches by both match ID and bank transaction ID to handle cases
+        where multiple matches have the same ID (can happen when suggestions
+        are regenerated).
         """
+        beacon_ids = [b.id for b in match.beacon_entries]
+        print(f"[DEBUG] find_match_in_suggestions: looking for {match.id}, bank={match.bank_transaction.id}, beacons={beacon_ids}")
+
+        # First try to find by both match ID and bank transaction ID (most reliable)
         for i, suggestion in enumerate(self.match_suggestions):
-            if suggestion.id == match.id:
+            if (suggestion.id == match.id and
+                suggestion.bank_transaction.id == match.bank_transaction.id):
+                print(f"[DEBUG]   Found by ID+bank at index {i}")
                 return i
+
+        # Fallback: try to find by bank transaction ID only
+        for i, suggestion in enumerate(self.match_suggestions):
+            if suggestion.bank_transaction.id == match.bank_transaction.id:
+                # Check if beacon entries also match
+                if len(suggestion.beacon_entries) == len(match.beacon_entries):
+                    beacon_ids_match = all(
+                        s.id == m.id
+                        for s, m in zip(suggestion.beacon_entries, match.beacon_entries)
+                    )
+                    if beacon_ids_match:
+                        print(f"[DEBUG]   Found by bank+beacons at index {i}")
+                        return i
+
+        print(f"[DEBUG]   NOT FOUND!")
         return -1
 
 
