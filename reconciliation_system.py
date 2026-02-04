@@ -833,45 +833,63 @@ class ReconciliationSystem:
 
     def _calculate_name_score(self, bank_description: str,
                                beacon_payee: str) -> float:
-        """Calculate name similarity score (0-1) based on surname matching."""
-        # Extract potential name from bank description
-        bank_name = self._extract_name(bank_description)
-        beacon_name = self._normalize_name(beacon_payee)
+        """Calculate name similarity score (0-1) based on surname matching.
 
-        if not bank_name or not beacon_name:
-            return 0.3  # No name available, neutral score
+        Compares ALL potential surnames from bank description against ALL
+        potential surnames from beacon payee. Returns a match if ANY surname
+        matches, supporting:
+        - Different name orderings (FIRSTNAME SURNAME vs SURNAME FIRSTNAME)
+        - Family member matching (account holder vs member being paid for)
+        - Truncated bank names (ABERCROMB matching ABERCROMBIE)
+        """
+        # Extract potential surnames from both
+        bank_surnames = self._extract_potential_surnames(bank_description)
+        beacon_surnames = self._extract_potential_surnames(beacon_payee)
 
-        # Split into parts for comparison
-        bank_parts = bank_name.lower().split()
-        beacon_parts = beacon_name.lower().split()
+        if not bank_surnames or not beacon_surnames:
+            return 0.3  # No names available, neutral score
 
-        # Check for surname match (first part after normalization)
-        bank_surname = bank_parts[0] if bank_parts else ""
-        beacon_surname = beacon_parts[0] if beacon_parts else ""
+        # Check each bank surname against each beacon surname
+        best_score = 0.0
 
+        for bank_name in bank_surnames:
+            for beacon_name in beacon_surnames:
+                score = self._compare_surnames(bank_name.lower(), beacon_name.lower())
+                if score > best_score:
+                    best_score = score
+                    if best_score >= 0.9:
+                        return best_score  # Early exit on strong match
+
+        return best_score
+
+    def _compare_surnames(self, bank_surname: str, beacon_surname: str) -> float:
+        """Compare two surnames and return a similarity score (0-1).
+
+        Handles:
+        - Exact matches
+        - Truncated names (bank names can be truncated, e.g., ABERCROMB vs ABERCROMBIE)
+        - Typo tolerance for longer surnames
+        """
         if not bank_surname or not beacon_surname:
-            return 0.3
+            return 0.0
 
-        # Exact surname match
+        # Exact match
         if bank_surname == beacon_surname:
-            # Check initial if available
-            bank_initial = bank_parts[1][0] if len(bank_parts) > 1 else ""
-            beacon_initial = beacon_parts[1][0] if len(beacon_parts) > 1 else ""
+            return 0.9  # Surname matches
 
-            if bank_initial and beacon_initial:
-                if bank_initial == beacon_initial:
-                    return 1.0  # Full match: surname + initial
-                else:
-                    return 0.7  # Surname matches but different initial
-            return 0.9  # Surname matches, no initial to compare
+        # Prefix matching for truncated bank names (at least 5 chars to avoid false positives)
+        # Bank names are often truncated, so check if either is a prefix of the other
+        if len(bank_surname) >= 5 and len(beacon_surname) >= 5:
+            if beacon_surname.startswith(bank_surname) or bank_surname.startswith(beacon_surname):
+                # Truncation detected - good match
+                return 0.85
 
-        # Check if one surname contains the other (partial match)
-        if bank_surname in beacon_surname or beacon_surname in bank_surname:
-            # Only if the contained part is substantial (at least 4 chars)
-            if min(len(bank_surname), len(beacon_surname)) >= 4:
-                return 0.5
+        # Substring matching for substantial names (at least 5 chars)
+        if len(bank_surname) >= 5 and len(beacon_surname) >= 5:
+            if bank_surname in beacon_surname or beacon_surname in bank_surname:
+                return 0.7
 
-        # Use SequenceMatcher only for typo tolerance in longer surnames
+        # Typo tolerance for longer surnames (6+ chars)
         # Short surnames (5 chars or less) need exact match - one letter difference
         # in "BARRY" vs "PARRY" is a completely different person
         if len(bank_surname) >= 6 and len(beacon_surname) >= 6:
@@ -883,107 +901,59 @@ class ReconciliationSystem:
         # No meaningful match
         return 0.0
 
-    def _extract_name(self, description: str) -> str:
-        """Extract name from bank description - prioritizes reference name if present.
+    def _extract_potential_surnames(self, text: str) -> List[str]:
+        """Extract all potential surnames from a text string.
 
-        Bank description structure:
-        - Account name (who made payment): often uppercase "FIRSTNAME [MIDDLE] SURNAME"
-        - Reference (who payment is for): may be mixed case, or after U3A/number
-
-        Detection strategies:
-        1. Mixed-case word at end (after U3A/numbers) = reference name
-        2. "I SURNAME" where I matches first letter of SURNAME = reference (e.g., "L LEONARD")
-        3. "I SURNAME" where I doesn't match = middle initial, use account name
+        Returns a list of uppercase words that could be surnames (length > 2,
+        not noise words). This approach handles both "FIRSTNAME SURNAME" and
+        "SURNAME FIRSTNAME" orderings, as well as family member matching
+        (e.g., account holder Margaret Kinnear paying for member Ruth Kinnear).
         """
         import re
 
-        # Clean the description but preserve case for detection
-        clean_desc = re.sub(r'\bu3a\d*\b', '', description, flags=re.IGNORECASE).strip()
-        clean_desc = re.sub(r'\b\d+(/\d+)?\b', '', clean_desc).strip()
-        clean_desc = re.sub(r'[-]', ' ', clean_desc)
-        clean_desc = ' '.join(clean_desc.split())
+        # Clean the text: remove U3A references, SUBS, REFUND, and numbers
+        clean_text = re.sub(r'\bu3a\d*\b', '', text, flags=re.IGNORECASE)
+        clean_text = re.sub(r'\bsubs?\b', '', clean_text, flags=re.IGNORECASE)
+        clean_text = re.sub(r'\brefunds?\b', '', clean_text, flags=re.IGNORECASE)
+        clean_text = re.sub(r'\b\d+(/\d+)?\b', '', clean_text)
+        clean_text = re.sub(r'[-]', ' ', clean_text)
+        clean_text = ' '.join(clean_text.split())
 
-        parts = clean_desc.split()  # Keep original case
+        parts = clean_text.split()
 
-        noise_words = {'PAYMENT', 'TRANSFER', 'CREDIT', 'DEBIT', 'REF', 'FT', 'TFR'}
-        name_parts = [p for p in parts if re.match(r'^[A-Za-z]+$', p) and p.upper() not in noise_words]
-        combined_initials = [p for p in parts if '&' in p and re.match(r'^[A-Za-z&]+$', p)]
+        # Noise words that should not be considered as names
+        noise_words = {
+            'PAYMENT', 'TRANSFER', 'CREDIT', 'DEBIT', 'REF', 'FT', 'TFR',
+            'MISS', 'MR', 'MRS', 'MS', 'DR', 'PROF',
+            'THE', 'AND', 'FOR', 'WITH'
+        }
 
-        if not name_parts:
-            return clean_desc
+        # Accept words with letters and apostrophes (for O'Carroll, etc.)
+        potential_surnames = []
+        for p in parts:
+            # Allow apostrophes in names
+            clean_p = re.sub(r"'", '', p)  # Remove apostrophe for validation
+            if re.match(r'^[A-Za-z]+$', clean_p) and len(p) > 2 and p.upper() not in noise_words:
+                potential_surnames.append(p.upper())
 
-        # Strategy 1: Check for mixed-case word at the end - this is a reference name
-        last_word = name_parts[-1]
-        if len(last_word) > 1 and last_word[0].isupper() and not last_word.isupper():
-            # Mixed case like "Bryant" - this is the reference
-            return last_word.upper()
+        return potential_surnames
 
-        # Work with uppercase for remaining logic
-        upper_parts = [p.upper() for p in name_parts]
-        potential_surnames = [p for p in upper_parts if len(p) > 2]
+    def _extract_name(self, description: str) -> str:
+        """Extract name from bank description.
 
-        if not potential_surnames:
-            return clean_desc.upper()
-
-        # Strategy 2: Check for "I SURNAME" pattern where I matches SURNAME[0]
-        # This indicates a reference like "L LEONARD" (L for Leonard)
-        last_surname = potential_surnames[-1]
-        last_surname_idx = upper_parts.index(last_surname)
-
-        if last_surname_idx > 0:
-            prev_part = upper_parts[last_surname_idx - 1]
-            if len(prev_part) == 1 and prev_part == last_surname[0]:
-                # "L LEONARD" pattern - initial matches surname
-                return f"{last_surname} {prev_part}"
-
-        # Strategy 3: Combined initials for joint payments (like "PA&JC")
-        if combined_initials and potential_surnames:
-            surname = potential_surnames[0]  # First surname for joint payments
-            initial = combined_initials[0][0].upper()
-            return f"{surname} {initial}"
-
-        # Strategy 4: Standard account name - FIRSTNAME [MIDDLE] SURNAME
-        # Use first name's initial with last surname
-        if len(potential_surnames) >= 2:
-            first_name = potential_surnames[0]
-            surname = potential_surnames[-1]
-            return f"{surname} {first_name[0]}"
-
-        # Fallback: Single name word
-        return potential_surnames[0] if potential_surnames else clean_desc.upper()
+        Returns a string with all potential surnames for matching.
+        Bank names can be truncated by the bank (e.g., ABERCROMBIE -> ABERCROMB).
+        """
+        surnames = self._extract_potential_surnames(description)
+        return ' '.join(surnames) if surnames else description.upper()
 
     def _normalize_name(self, payee: str) -> str:
-        """Normalize beacon payee name to SURNAME I format."""
-        import re
-        # Remove U3A references (including U3A followed by numbers) and trailing member numbers
-        clean_payee = re.sub(r'\bu3a\d*\b', '', payee, flags=re.IGNORECASE).strip()
-        clean_payee = re.sub(r'\s+\d+$', '', clean_payee).strip()
+        """Normalize beacon payee name - extract potential surnames.
 
-        parts = clean_payee.split()
-        if len(parts) < 2:
-            return payee.upper()
-
-        # Find potential surnames (words longer than 1 character)
-        potential_surnames = [p for p in parts if len(p) > 1]
-
-        if not potential_surnames:
-            return payee.upper()
-
-        # Surname is typically the last long word
-        surname = potential_surnames[-1].upper()
-
-        # Find initial - prefer single-letter parts, else first char of first word
-        single_letters = [p[0].upper() for p in parts if len(p) == 1]
-        if single_letters:
-            initial = single_letters[0]
-        elif parts[0].upper() != surname:
-            initial = parts[0][0].upper()
-        else:
-            initial = ""
-
-        if initial:
-            return f"{surname} {initial}"
-        return surname
+        Uses the same approach as bank name extraction for consistent matching.
+        """
+        surnames = self._extract_potential_surnames(payee)
+        return ' '.join(surnames) if surnames else payee.upper()
 
     def _calculate_amount_score(self, amount: Decimal) -> float:
         """Calculate amount score based on whether it's a common amount."""
