@@ -552,14 +552,35 @@ class ReconciliationGUI:
         )
         self.next_issue_button.pack(side=tk.LEFT, padx=5)
 
+        # Related records navigation (for stepping through records in same issue)
+        self.prev_related_button = ttk.Button(
+            consistency_row, text="◄ Related",
+            command=self._on_prev_related,
+            state=tk.DISABLED
+        )
+        self.prev_related_button.pack(side=tk.LEFT, padx=2)
+
+        self.related_label = ttk.Label(
+            consistency_row, text="", foreground='gray', width=8
+        )
+        self.related_label.pack(side=tk.LEFT, padx=2)
+
+        self.next_related_button = ttk.Button(
+            consistency_row, text="Related ►",
+            command=self._on_next_related,
+            state=tk.DISABLED
+        )
+        self.next_related_button.pack(side=tk.LEFT, padx=2)
+
         self.inconsistency_label = ttk.Label(
-            consistency_row, text="", foreground='gray', wraplength=500
+            consistency_row, text="", foreground='gray', wraplength=400
         )
         self.inconsistency_label.pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
 
         # Track inconsistencies
-        self.inconsistencies = []  # List of (match, reason) tuples
+        self.inconsistencies = []  # List of (match, reason, related_matches) tuples
         self.current_inconsistency_index = 0
+        self.current_related_index = 0  # Index within related_matches
 
     def _update_display(self):
         """Update the display for the current match."""
@@ -1050,25 +1071,55 @@ class ReconciliationGUI:
         if not self.inconsistencies:
             self.prev_issue_button.config(state=tk.DISABLED)
             self.next_issue_button.config(state=tk.DISABLED)
+            self.prev_related_button.config(state=tk.DISABLED)
+            self.next_related_button.config(state=tk.DISABLED)
+            self.related_label.config(text="")
             self.inconsistency_label.config(text="No inconsistencies found", foreground='green')
         else:
             count = len(self.inconsistencies)
             current = self.current_inconsistency_index + 1
-            reason = self.inconsistencies[self.current_inconsistency_index][1]
+            match, reason, related_matches = self.inconsistencies[self.current_inconsistency_index]
+
             # Truncate very long messages
-            if len(reason) > 100:
-                reason = reason[:100] + "..."
+            if len(reason) > 80:
+                reason = reason[:80] + "..."
             self.inconsistency_label.config(
                 text=f"Issue {current}/{count}: {reason}",
                 foreground='red'
             )
-            # Enable/disable buttons based on position
+
+            # Enable/disable issue navigation buttons
             self.prev_issue_button.config(
                 state=tk.NORMAL if self.current_inconsistency_index > 0 else tk.DISABLED
             )
             self.next_issue_button.config(
                 state=tk.NORMAL if self.current_inconsistency_index < count - 1 else tk.DISABLED
             )
+
+            # Update related records navigation
+            num_related = len(related_matches)
+            if num_related > 1:
+                # Find current position in related matches
+                current_match = self.suggestions[self.current_index] if self.current_index < len(self.suggestions) else None
+                if current_match:
+                    for i, rm in enumerate(related_matches):
+                        if rm.id == current_match.id:
+                            self.current_related_index = i
+                            break
+
+                self.related_label.config(text=f"{self.current_related_index + 1}/{num_related}")
+                self.prev_related_button.config(
+                    state=tk.NORMAL if self.current_related_index > 0 else tk.DISABLED
+                )
+                self.next_related_button.config(
+                    state=tk.NORMAL if self.current_related_index < num_related - 1 else tk.DISABLED
+                )
+            else:
+                # Only one related match, disable related navigation
+                self.related_label.config(text="")
+                self.prev_related_button.config(state=tk.DISABLED)
+                self.next_related_button.config(state=tk.DISABLED)
+
         # Force UI refresh
         self.inconsistency_label.update_idletasks()
 
@@ -1078,7 +1129,8 @@ class ReconciliationGUI:
             return
 
         self.current_inconsistency_index = index
-        match, reason = self.inconsistencies[index]
+        self.current_related_index = 0  # Reset to first related match
+        match, reason, related_matches = self.inconsistencies[index]
 
         # Find the match in the suggestions list
         # First, ensure we're showing all transactions (including confirmed)
@@ -1125,6 +1177,41 @@ class ReconciliationGUI:
             new_index = len(self.inconsistencies) - 1
 
         self._navigate_to_inconsistency(new_index)
+
+    def _on_prev_related(self):
+        """Navigate to previous related match within current inconsistency."""
+        if not self.inconsistencies:
+            return
+
+        match, reason, related_matches = self.inconsistencies[self.current_inconsistency_index]
+        if self.current_related_index > 0:
+            self.current_related_index -= 1
+            self._navigate_to_related_match(related_matches[self.current_related_index])
+
+    def _on_next_related(self):
+        """Navigate to next related match within current inconsistency."""
+        if not self.inconsistencies:
+            return
+
+        match, reason, related_matches = self.inconsistencies[self.current_inconsistency_index]
+        if self.current_related_index < len(related_matches) - 1:
+            self.current_related_index += 1
+            self._navigate_to_related_match(related_matches[self.current_related_index])
+
+    def _navigate_to_related_match(self, match):
+        """Navigate to a specific related match."""
+        # Ensure we're showing all transactions
+        if not self.show_all_var.get():
+            self.show_all_var.set(True)
+            self._on_show_all_changed()
+
+        # Find the match index in suggestions
+        match_index = self.system.find_match_in_suggestions(match)
+        if match_index >= 0:
+            self.current_index = match_index
+            self._update_display()
+
+        self._update_inconsistency_ui()
 
 
 def main():

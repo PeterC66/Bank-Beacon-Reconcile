@@ -1206,10 +1206,13 @@ class ReconciliationSystem:
                     str(b2.amount) if b2 else ''
                 ])
 
-    def check_consistency(self, progress_callback: Callable[[int, int, str], None] = None) -> List[Tuple['MatchSuggestion', str]]:
+    def check_consistency(self, progress_callback: Callable[[int, int, str], None] = None) -> List[Tuple['MatchSuggestion', str, List['MatchSuggestion']]]:
         """Check for inconsistencies in confirmed matches.
 
-        Returns a list of (match, reason) tuples for any inconsistent matches.
+        Returns a list of (match, reason, related_matches) tuples for any inconsistent matches.
+        - match: The primary match for this inconsistency
+        - reason: Description of the inconsistency
+        - related_matches: All matches involved in this inconsistency (for navigation)
 
         Checks:
         1. Each beacon transaction is confirmed in at most one match
@@ -1245,9 +1248,12 @@ class ReconciliationSystem:
                     match_ids = [m.id for m in matches_with_beacon]
                     reason = f"Beacon {beacon.id} ({beacon.payee}, £{beacon.amount}) is confirmed in multiple matches: {', '.join(match_ids)}"
                     # Add each match that shares this beacon as inconsistent
+                    # Include all related matches for navigation
                     for m in matches_with_beacon:
-                        if (m, reason) not in inconsistencies:
-                            inconsistencies.append((m, reason))
+                        entry = (m, reason, matches_with_beacon)
+                        # Check if this match is already in inconsistencies
+                        if not any(existing[0].id == m.id and existing[1] == reason for existing in inconsistencies):
+                            inconsistencies.append(entry)
 
         # Check 2: Bank amount should equal sum of beacon amounts
         for match in self.confirmed_matches:
@@ -1263,8 +1269,10 @@ class ReconciliationSystem:
 
             if bank_amount != beacon_total:
                 reason = f"Amount mismatch: Bank £{bank_amount} != Beacon total £{beacon_total}"
-                if (match, reason) not in inconsistencies:
-                    inconsistencies.append((match, reason))
+                # Only one match involved in amount mismatch
+                entry = (match, reason, [match])
+                if not any(existing[0].id == match.id and existing[1] == reason for existing in inconsistencies):
+                    inconsistencies.append(entry)
 
         return inconsistencies
 
