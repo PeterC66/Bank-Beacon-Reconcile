@@ -16,7 +16,7 @@ from typing import Optional
 import sys
 
 from reconciliation_system import (
-    ReconciliationSystem, MatchSuggestion, MatchStatus
+    ReconciliationSystem, MatchSuggestion, MatchStatus, debug_log
 )
 
 
@@ -1315,13 +1315,13 @@ class ReconciliationGUI:
             return
 
         match, reason, related_matches = self.inconsistencies[self.current_inconsistency_index]
-        print(f"[DEBUG] _on_prev_related: {len(related_matches)} related matches, current_related_index={self.current_related_index}")
+        debug_log(f"_on_prev_related: {len(related_matches)} related matches, current_related_index={self.current_related_index}")
         for i, rm in enumerate(related_matches):
-            print(f"[DEBUG]   related[{i}]: {rm.id}")
+            debug_log(f"  related[{i}]: {rm.id}, bank={rm.bank_transaction.id}")
         if self.current_related_index > 0:
             self.current_related_index -= 1
             target_match = related_matches[self.current_related_index]
-            print(f"[DEBUG] Navigating to related[{self.current_related_index}]: {target_match.id}")
+            debug_log(f"Navigating to related[{self.current_related_index}]: {target_match.id}")
             self._navigate_to_related_match(target_match)
 
     def _on_next_related(self):
@@ -1330,18 +1330,18 @@ class ReconciliationGUI:
             return
 
         match, reason, related_matches = self.inconsistencies[self.current_inconsistency_index]
-        print(f"[DEBUG] _on_next_related: {len(related_matches)} related matches, current_related_index={self.current_related_index}")
+        debug_log(f"_on_next_related: {len(related_matches)} related matches, current_related_index={self.current_related_index}")
         for i, rm in enumerate(related_matches):
-            print(f"[DEBUG]   related[{i}]: {rm.id}")
+            debug_log(f"  related[{i}]: {rm.id}, bank={rm.bank_transaction.id}")
         if self.current_related_index < len(related_matches) - 1:
             self.current_related_index += 1
             target_match = related_matches[self.current_related_index]
-            print(f"[DEBUG] Navigating to related[{self.current_related_index}]: {target_match.id}")
+            debug_log(f"Navigating to related[{self.current_related_index}]: {target_match.id}")
             self._navigate_to_related_match(target_match)
 
     def _navigate_to_related_match(self, match):
         """Navigate to a specific related match."""
-        print(f"[DEBUG] _navigate_to_related_match: looking for {match.id}")
+        debug_log(f"_navigate_to_related_match: looking for {match.id}, bank={match.bank_transaction.id}")
 
         # Ensure we're showing all transactions
         if not self.show_all_var.get():
@@ -1350,14 +1350,14 @@ class ReconciliationGUI:
 
         # Find the match index in suggestions
         match_index = self.system.find_match_in_suggestions(match)
-        print(f"[DEBUG] find_match_in_suggestions returned index={match_index}")
+        debug_log(f"find_match_in_suggestions returned index={match_index}")
         if match_index >= 0:
             self.current_index = match_index
             actual_match = self.suggestions[self.current_index]
-            print(f"[DEBUG] Moved to index {match_index}, actual match is {actual_match.id}")
+            debug_log(f"Moved to index {match_index}, actual match is {actual_match.id}, bank={actual_match.bank_transaction.id}")
             self._update_display()
         else:
-            print(f"[DEBUG] WARNING: Match {match.id} not found in suggestions!")
+            debug_log(f"WARNING: Match {match.id} not found in suggestions!")
 
         self._update_inconsistency_ui()
 

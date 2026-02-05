@@ -15,6 +15,7 @@ Features:
 import csv
 import json
 import os
+import inspect
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Tuple, Dict, Callable
@@ -22,6 +23,12 @@ from difflib import SequenceMatcher
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
+
+
+def debug_log(message: str):
+    """Print debug message with line number."""
+    frame = inspect.currentframe().f_back
+    print(f"[DEBUG L{frame.f_lineno}] {message}")
 
 
 class MatchStatus(Enum):
@@ -577,7 +584,25 @@ class ReconciliationSystem:
         self.progress_callback = progress_callback
         self.trans_no_limit = trans_no_limit
         self.match_suggestions = []
-        suggestion_id = 0
+
+        # Clean up confirmed_matches: remove entries that are no longer confirmed
+        self.confirmed_matches = [m for m in self.confirmed_matches
+                                  if m.status in (MatchStatus.CONFIRMED,
+                                                  MatchStatus.MANUAL_MATCH,
+                                                  MatchStatus.MANUALLY_RESOLVED)]
+
+        # Start suggestion IDs from a number higher than any existing match
+        # to avoid ID collisions
+        max_existing_id = 0
+        for match in self.confirmed_matches:
+            if match.id.startswith('MATCH_'):
+                try:
+                    num = int(match.id.split('_')[1])
+                    max_existing_id = max(max_existing_id, num)
+                except (ValueError, IndexError):
+                    pass
+        suggestion_id = max_existing_id + 1
+        debug_log(f"Starting suggestion_id from {suggestion_id}, confirmed_matches has {len(self.confirmed_matches)} entries")
 
         # Get bank transactions to process
         confirmed_bank_ids = {m.bank_transaction.id for m in self.confirmed_matches}
@@ -1348,7 +1373,7 @@ class ReconciliationSystem:
         total_checks = len(actually_confirmed) * 2  # Two checks per match
         current_check = 0
 
-        print(f"[DEBUG] check_consistency: {len(self.confirmed_matches)} in confirmed_matches list, {len(actually_confirmed)} actually CONFIRMED")
+        debug_log(f"check_consistency: {len(self.confirmed_matches)} in confirmed_matches list, {len(actually_confirmed)} actually CONFIRMED")
 
         # Build a map of beacon_id -> list of confirmed matches that include it
         beacon_to_matches: Dict[str, List[MatchSuggestion]] = {}
@@ -1374,9 +1399,9 @@ class ReconciliationSystem:
                 if len(matches_with_beacon) > 1:
                     # This beacon is in multiple confirmed matches
                     match_ids = [m.id for m in matches_with_beacon]
-                    print(f"[DEBUG] Beacon {beacon.id} found in {len(matches_with_beacon)} confirmed matches: {match_ids}")
+                    debug_log(f"Beacon {beacon.id} found in {len(matches_with_beacon)} confirmed matches: {match_ids}")
                     for m in matches_with_beacon:
-                        print(f"[DEBUG]   - {m.id}: bank={m.bank_transaction.id}, status={m.status}")
+                        debug_log(f"  - {m.id}: bank={m.bank_transaction.id}, status={m.status}")
                     reason = f"Beacon {beacon.id} ({beacon.payee}, £{beacon.amount}) is confirmed in multiple matches: {', '.join(match_ids)}"
                     # Add ONE entry per beacon issue (use first match as primary)
                     # Include all related matches for navigation
@@ -1405,7 +1430,7 @@ class ReconciliationSystem:
                 if not any(existing[0].id == match.id and existing[1] == reason for existing in inconsistencies):
                     inconsistencies.append(entry)
 
-        print(f"[DEBUG] check_consistency: found {len(inconsistencies)} inconsistencies")
+        debug_log(f"check_consistency: found {len(inconsistencies)} inconsistencies")
         return inconsistencies
 
     def find_match_in_suggestions(self, match: 'MatchSuggestion') -> int:
@@ -1418,13 +1443,13 @@ class ReconciliationSystem:
         are regenerated).
         """
         beacon_ids = [b.id for b in match.beacon_entries]
-        print(f"[DEBUG] find_match_in_suggestions: looking for {match.id}, bank={match.bank_transaction.id}, beacons={beacon_ids}")
+        debug_log(f"find_match_in_suggestions: looking for {match.id}, bank={match.bank_transaction.id}, beacons={beacon_ids}")
 
         # First try to find by both match ID and bank transaction ID (most reliable)
         for i, suggestion in enumerate(self.match_suggestions):
             if (suggestion.id == match.id and
                 suggestion.bank_transaction.id == match.bank_transaction.id):
-                print(f"[DEBUG]   Found by ID+bank at index {i}")
+                debug_log(f"  Found by ID+bank at index {i}")
                 return i
 
         # Fallback: try to find by bank transaction ID only
@@ -1437,10 +1462,10 @@ class ReconciliationSystem:
                         for s, m in zip(suggestion.beacon_entries, match.beacon_entries)
                     )
                     if beacon_ids_match:
-                        print(f"[DEBUG]   Found by bank+beacons at index {i}")
+                        debug_log(f"  Found by bank+beacons at index {i}")
                         return i
 
-        print(f"[DEBUG]   NOT FOUND!")
+        debug_log(f"  NOT FOUND!")
         return -1
 
     def find_beacon_by_trans_no(self, trans_no: str) -> Optional[BeaconEntry]:
