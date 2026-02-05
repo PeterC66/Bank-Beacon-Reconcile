@@ -568,6 +568,15 @@ class ReconciliationGUI:
             command=self._on_export
         ).pack(side=tk.LEFT, padx=5)
 
+        # Date tolerance control
+        ttk.Label(action_row, text="  Date tolerance (days):").pack(side=tk.LEFT, padx=(10, 2))
+        self.date_tolerance_var = tk.IntVar(value=self.system.date_tolerance_days)
+        self.date_tolerance_spinbox = ttk.Spinbox(
+            action_row, from_=1, to=365, width=4,
+            textvariable=self.date_tolerance_var
+        )
+        self.date_tolerance_spinbox.pack(side=tk.LEFT, padx=2)
+
         ttk.Button(
             action_row, text="Refresh Suggestions",
             command=self._on_refresh
@@ -1014,16 +1023,19 @@ class ReconciliationGUI:
         # Regenerate suggestions with current settings
         include_confirmed = self.show_all_var.get()
         trans_no_limit = self.trans_no_limit_var.get()
+        date_tolerance = self.date_tolerance_var.get()
         self.suggestions = self.system.generate_suggestions(
             include_confirmed=include_confirmed,
-            trans_no_limit=trans_no_limit
+            trans_no_limit=trans_no_limit,
+            date_tolerance_days=date_tolerance
         )
         self.current_index = 0
 
         self._update_display()
         messagebox.showinfo(
             "Refreshed",
-            f"Generated {len(self.suggestions)} match suggestions"
+            f"Generated {len(self.suggestions)} match suggestions\n"
+            f"(Date tolerance: {date_tolerance} days)"
         )
 
     def _on_auto_confirm(self):
@@ -1121,9 +1133,11 @@ class ReconciliationGUI:
         # Regenerate suggestions with new setting
         include_confirmed = self.show_all_var.get()
         trans_no_limit = self.trans_no_limit_var.get()
+        date_tolerance = self.date_tolerance_var.get()
         self.suggestions = self.system.generate_suggestions(
             include_confirmed=include_confirmed,
-            trans_no_limit=trans_no_limit
+            trans_no_limit=trans_no_limit,
+            date_tolerance_days=date_tolerance
         )
         self.current_index = 0
 
@@ -1137,9 +1151,11 @@ class ReconciliationGUI:
         # Regenerate suggestions with new trans_no limit
         include_confirmed = self.show_all_var.get()
         trans_no_limit = self.trans_no_limit_var.get()
+        date_tolerance = self.date_tolerance_var.get()
         self.suggestions = self.system.generate_suggestions(
             include_confirmed=include_confirmed,
-            trans_no_limit=trans_no_limit
+            trans_no_limit=trans_no_limit,
+            date_tolerance_days=date_tolerance
         )
         self.current_index = 0
 

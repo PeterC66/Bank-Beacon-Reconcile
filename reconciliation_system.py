@@ -163,8 +163,8 @@ class ReconciliationSystem:
     AUTO_CONFIRM_COMMON_THRESHOLD = 0.90  # >90% for common amounts
     AUTO_CONFIRM_OTHER_THRESHOLD = 0.80   # >80% for other amounts
 
-    # Date tolerance in days
-    DATE_TOLERANCE_DAYS = 7
+    # Default date tolerance in days (can be overridden per-call)
+    DEFAULT_DATE_TOLERANCE_DAYS = 7
 
     def __init__(self,
                  bank_file: str = "Bank_Transactions.csv",
@@ -203,6 +203,9 @@ class ReconciliationSystem:
 
         # Progress callback
         self.progress_callback: Optional[Callable[[int, int, str], None]] = None
+
+        # Date tolerance for matching (can be changed at runtime)
+        self.date_tolerance_days = self.DEFAULT_DATE_TOLERANCE_DAYS
 
     def load_data(self):
         """Load transactions from CSV files."""
@@ -572,7 +575,8 @@ class ReconciliationSystem:
     def generate_suggestions(self, progress_callback: Callable[[int, int, str], None] = None,
                              include_confirmed: bool = False,
                              trans_no_limit: int = 5,
-                             auto_confirm: bool = False) -> List[MatchSuggestion]:
+                             auto_confirm: bool = False,
+                             date_tolerance_days: int = None) -> List[MatchSuggestion]:
         """Generate match suggestions for bank transactions.
 
         Args:
@@ -580,9 +584,12 @@ class ReconciliationSystem:
             include_confirmed: If True, include bank transactions that already have confirmed matches
             trans_no_limit: Maximum difference between trans_no values for 1-to-2 matches
             auto_confirm: If True, automatically confirm high-confidence matches
+            date_tolerance_days: Maximum days difference for date matching (None = use current setting)
         """
         self.progress_callback = progress_callback
         self.trans_no_limit = trans_no_limit
+        if date_tolerance_days is not None:
+            self.date_tolerance_days = date_tolerance_days
         self.match_suggestions = []
 
         # Clean up confirmed_matches: remove entries that are no longer confirmed
@@ -946,14 +953,22 @@ class ReconciliationSystem:
         """Calculate date proximity score (0-1).
 
         Beacon is typically entered AFTER bank transaction clears.
-        - Beacon after bank: normal, allow up to 9 weeks (April renewal catchup)
+        - Beacon after bank: normal, allow up to self.date_tolerance_days
         - Beacon before bank: unusual, only allow 1-2 days
+
+        The date_tolerance_days setting controls the maximum allowed date difference.
         """
         # Positive = beacon after bank (normal), negative = beacon before bank (unusual)
         days_diff = (beacon_date - bank_date).days
+        tolerance = self.date_tolerance_days
 
         if days_diff >= 0:
             # Beacon AFTER bank (normal case)
+            # Check against configurable tolerance
+            if days_diff > tolerance:
+                return 0.0    # Beyond tolerance, reject
+
+            # Score based on how close the dates are
             if days_diff == 0:
                 return 1.0    # Same day
             elif days_diff == 1:
@@ -970,10 +985,8 @@ class ReconciliationSystem:
                 return 0.25   # Within 4 weeks
             elif days_diff <= 42:
                 return 0.15   # Within 6 weeks
-            elif days_diff <= 63:
-                return 0.10   # Within 9 weeks (April renewal catchup)
             else:
-                return 0.0    # Too late, reject
+                return 0.10   # Within tolerance but > 6 weeks
         else:
             # Beacon BEFORE bank (unusual case)
             abs_diff = abs(days_diff)
