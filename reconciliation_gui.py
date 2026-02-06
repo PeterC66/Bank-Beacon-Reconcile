@@ -260,6 +260,15 @@ class ReconciliationGUI:
         self.search_result_label = ttk.Label(search_row, text="", foreground='gray')
         self.search_result_label.pack(side=tk.LEFT, padx=10)
 
+        # Search help text
+        search_help = ttk.Label(
+            search_row,
+            text='[name | "exact" | £amount | date | MATCH_/BANK_/BEACON_id]',
+            foreground='#666666',
+            font=('Segoe UI', 8)
+        )
+        search_help.pack(side=tk.LEFT, padx=5)
+
         # Track search state
         self.search_matches = []
         self.search_index = 0
@@ -1063,31 +1072,174 @@ class ReconciliationGUI:
                 "No matches met the auto-confirmation thresholds"
             )
 
+    def _parse_search_date(self, date_str: str):
+        """Try to parse a date string in various formats.
+
+        Returns datetime if successful, None otherwise.
+        Supports: DD/MM/YYYY, DD-MM-YYYY, DD MM YYYY, DD-Mon-YYYY, YYYY-MM-DD
+        """
+        from datetime import datetime
+        formats = [
+            '%d/%m/%Y',      # 17/03/2025
+            '%d-%m-%Y',      # 17-03-2025
+            '%d/%m/%y',      # 17/03/25
+            '%d-%m-%y',      # 17-03-25
+            '%d %b %Y',      # 17 Mar 2025
+            '%d %B %Y',      # 17 March 2025
+            '%d-%b-%Y',      # 17-Mar-2025
+            '%d-%b-%y',      # 17-Mar-25
+            '%Y-%m-%d',      # 2025-03-17
+        ]
+        for fmt in formats:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except ValueError:
+                continue
+        return None
+
+    def _detect_search_type(self, search_term: str):
+        """Detect the type of search based on the search term.
+
+        Returns tuple of (search_type, parsed_value) where search_type is one of:
+        - 'quoted': literal string search (parsed_value = unquoted string)
+        - 'match_id': exact Match ID search
+        - 'bank_id': exact Bank ID search
+        - 'beacon_id': exact Beacon ID search
+        - 'date': date search (parsed_value = datetime)
+        - 'amount': amount search (parsed_value = Decimal)
+        - 'name': name/description search (parsed_value = lowercase search term)
+        """
+        from decimal import Decimal, InvalidOperation
+
+        term = search_term.strip()
+
+        # 1. Check for quoted string (literal search)
+        if term.startswith('"') and term.endswith('"') and len(term) > 2:
+            return ('quoted', term[1:-1])
+
+        # 2. Check for ID prefixes (exact match)
+        upper_term = term.upper()
+        if upper_term.startswith('MATCH_') or upper_term.startswith('MANUAL_') or upper_term.startswith('RESOLVED_'):
+            return ('match_id', upper_term)
+        if upper_term.startswith('BANK_'):
+            return ('bank_id', upper_term)
+        if upper_term.startswith('BEACON_'):
+            return ('beacon_id', upper_term)
+
+        # 3. Check for date
+        parsed_date = self._parse_search_date(term)
+        if parsed_date:
+            return ('date', parsed_date)
+
+        # 4. Check for amount (number, possibly with £ prefix)
+        amount_str = term.lstrip('£').strip()
+        try:
+            # Try to parse as decimal
+            amount = Decimal(amount_str)
+            return ('amount', amount)
+        except InvalidOperation:
+            pass
+
+        # 5. Default to name search
+        return ('name', term.lower())
+
     def _on_search(self, event=None):
-        """Search for matches by description or payee."""
-        search_term = self.search_entry.get().strip().lower()
+        """Search for matches by various criteria with auto-detection.
+
+        Supports:
+        - "quoted text": Literal string search in description/payee
+        - MATCH_*, BANK_*, BEACON_*: Exact ID search
+        - Date formats (17/03/2025, etc.): Date search
+        - Numbers or £amounts: Amount search
+        - Other text: Name/description substring search
+        """
+        search_term = self.search_entry.get().strip()
         if not search_term:
             self.search_result_label.config(text="Enter search term")
             return
 
+        search_type, parsed_value = self._detect_search_type(search_term)
         self.search_matches = []
+
         for i, match in enumerate(self.suggestions):
-            # Search in bank description
-            if search_term in match.bank_transaction.description.lower():
-                self.search_matches.append(i)
-                continue
-            # Search in beacon payees
-            for beacon in match.beacon_entries:
-                if search_term in beacon.payee.lower():
+            bank = match.bank_transaction
+            beacons = match.beacon_entries
+
+            if search_type == 'quoted':
+                # Literal string search in description and payee
+                search_lower = parsed_value.lower()
+                if search_lower in bank.description.lower():
                     self.search_matches.append(i)
-                    break
+                    continue
+                for beacon in beacons:
+                    if search_lower in beacon.payee.lower():
+                        self.search_matches.append(i)
+                        break
+
+            elif search_type == 'match_id':
+                # Exact match ID search
+                if match.id.upper() == parsed_value:
+                    self.search_matches.append(i)
+
+            elif search_type == 'bank_id':
+                # Exact bank ID search
+                if bank.id.upper() == parsed_value:
+                    self.search_matches.append(i)
+
+            elif search_type == 'beacon_id':
+                # Exact beacon ID search
+                for beacon in beacons:
+                    if beacon.id.upper() == parsed_value:
+                        self.search_matches.append(i)
+                        break
+
+            elif search_type == 'date':
+                # Date search - match bank date or any beacon date
+                if bank.date.date() == parsed_value.date():
+                    self.search_matches.append(i)
+                    continue
+                for beacon in beacons:
+                    if beacon.date.date() == parsed_value.date():
+                        self.search_matches.append(i)
+                        break
+
+            elif search_type == 'amount':
+                # Amount search - match bank amount or any beacon amount
+                if bank.amount == parsed_value:
+                    self.search_matches.append(i)
+                    continue
+                for beacon in beacons:
+                    if beacon.amount == parsed_value:
+                        self.search_matches.append(i)
+                        break
+
+            else:  # 'name' - default substring search
+                # Search in bank description
+                if parsed_value in bank.description.lower():
+                    self.search_matches.append(i)
+                    continue
+                # Search in beacon payees
+                for beacon in beacons:
+                    if parsed_value in beacon.payee.lower():
+                        self.search_matches.append(i)
+                        break
 
         if self.search_matches:
             self.search_index = 0
             self.current_index = self.search_matches[0]
             self._update_display()
+            # Show search type in result
+            type_labels = {
+                'quoted': 'text',
+                'match_id': 'Match ID',
+                'bank_id': 'Bank ID',
+                'beacon_id': 'Beacon ID',
+                'date': 'date',
+                'amount': 'amount',
+                'name': 'name'
+            }
             self.search_result_label.config(
-                text=f"Found {len(self.search_matches)} matches (1/{len(self.search_matches)})"
+                text=f"Found {len(self.search_matches)} ({type_labels[search_type]}) (1/{len(self.search_matches)})"
             )
         else:
             self.search_result_label.config(text="No matches found")
