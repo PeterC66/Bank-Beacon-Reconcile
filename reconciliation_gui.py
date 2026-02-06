@@ -790,10 +790,10 @@ class ReconciliationGUI:
                     font=('Segoe UI', 10)
                 )
             else:
-                # Make "No match found" stand out with red color and larger font
+                # Make "No match found" stand out with larger font
                 self.no_match_label.config(
                     text="⚠ NO MATCH FOUND ⚠\n\nUse manual matching to link beacon entries by trans_no,\nor mark as resolved.",
-                    foreground='#CC0000',
+                    foreground='gray',
                     font=('Segoe UI', 12, 'bold')
                 )
             self.no_match_label.pack(fill=tk.X, pady=(10, 0))
@@ -1262,10 +1262,11 @@ class ReconciliationGUI:
                 'name': 'name'
             }
             self.search_result_label.config(
-                text=f"Found {len(self.search_matches)} ({type_labels[search_type]}) (1/{len(self.search_matches)})"
+                text=f"Found {len(self.search_matches)} ({type_labels[search_type]}) (1/{len(self.search_matches)})",
+                foreground='gray'
             )
         else:
-            self.search_result_label.config(text="No matches found")
+            self.search_result_label.config(text="No matches found", foreground='#CC0000')
 
     def _on_search_next(self):
         """Go to next search result."""
