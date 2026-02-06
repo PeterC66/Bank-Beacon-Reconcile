@@ -679,7 +679,7 @@ class ReconciliationGUI:
         ttk.Label(manual_row, text="  |  ").pack(side=tk.LEFT)
 
         self.export_csv_button = ttk.Button(
-            manual_row, text="Export CSVs",
+            manual_row, text="Reports",
             command=self._on_export_csvs
         )
         self.export_csv_button.pack(side=tk.LEFT, padx=5)
@@ -708,13 +708,13 @@ class ReconciliationGUI:
         self.progress_bar['maximum'] = len(self.suggestions)
         self.progress_bar['value'] = self.current_index + 1
 
-        # Update stats
+        # Update stats with amounts
         stats = self.system.get_statistics()
         self.stats_label.config(
-            text=f"Confirmed: {stats['confirmed_matches']} | "
-                 f"Pending: {stats['pending_suggestions']} | "
+            text=f"Confirmed: {stats['confirmed_matches']} (£{stats['confirmed_amount']:.2f}) | "
+                 f"Pending: {stats['pending_suggestions']} (£{stats['pending_amount']:.2f}) | "
                  f"Rejected: {stats['rejected_suggestions']} | "
-                 f"Unmatched Bank: {stats['unmatched_bank']}"
+                 f"Unmatched Bank: {stats['unmatched_bank']} (£{stats['unmatched_bank_amount']:.2f})"
         )
         self.stats_label.update_idletasks()
 
@@ -784,9 +784,18 @@ class ReconciliationGUI:
         if not match.beacon_entries:
             # No beacon entries - either no match found or manually resolved
             if match.match_type == "resolved":
-                self.no_match_label.config(text="Manually Resolved\n\nNo beacon entries linked.\nSee comment for resolution details.")
+                self.no_match_label.config(
+                    text="Manually Resolved\n\nNo beacon entries linked.\nSee comment for resolution details.",
+                    foreground='gray',
+                    font=('Segoe UI', 10)
+                )
             else:
-                self.no_match_label.config(text="No match found\n\nUse manual matching to link beacon entries by trans_no,\nor mark as resolved.")
+                # Make "No match found" stand out with red color and larger font
+                self.no_match_label.config(
+                    text="⚠ NO MATCH FOUND ⚠\n\nUse manual matching to link beacon entries by trans_no,\nor mark as resolved.",
+                    foreground='#CC0000',
+                    font=('Segoe UI', 12, 'bold')
+                )
             self.no_match_label.pack(fill=tk.X, pady=(10, 0))
             return
 

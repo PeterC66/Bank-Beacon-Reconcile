@@ -1313,40 +1313,65 @@ class ReconciliationSystem:
         print(f"[DEBUG]   -> final status: {match.status}")
 
     def get_statistics(self) -> Dict:
-        """Get reconciliation statistics."""
+        """Get reconciliation statistics including amount totals."""
+        from decimal import Decimal
+
         total_bank = len(self.bank_transactions)
         total_beacon = len(self.beacon_entries)
 
-        # Count different types of confirmed matches
-        confirmed_auto = len([m for m in self.confirmed_matches
-                             if m.status == MatchStatus.CONFIRMED])
-        manual_matches = len([m for m in self.confirmed_matches
-                             if m.status == MatchStatus.MANUAL_MATCH])
-        manually_resolved = len([m for m in self.confirmed_matches
-                                if m.status == MatchStatus.MANUALLY_RESOLVED])
-        total_confirmed = confirmed_auto + manual_matches + manually_resolved
+        # Count different types of confirmed matches and their amounts
+        confirmed_auto = [m for m in self.confirmed_matches
+                         if m.status == MatchStatus.CONFIRMED]
+        manual_matches = [m for m in self.confirmed_matches
+                         if m.status == MatchStatus.MANUAL_MATCH]
+        manually_resolved = [m for m in self.confirmed_matches
+                            if m.status == MatchStatus.MANUALLY_RESOLVED]
+
+        confirmed_count = len(confirmed_auto) + len(manual_matches) + len(manually_resolved)
+        confirmed_amount = sum(m.bank_transaction.amount for m in confirmed_auto)
+        manual_amount = sum(m.bank_transaction.amount for m in manual_matches)
+        resolved_amount = sum(m.bank_transaction.amount for m in manually_resolved)
+        total_confirmed_amount = confirmed_amount + manual_amount + resolved_amount
 
         matched_beacon = len(self.matched_beacon_ids)
 
-        pending = len([m for m in self.match_suggestions
-                      if m.status == MatchStatus.PENDING])
-        rejected = len([m for m in self.match_suggestions
-                       if m.status == MatchStatus.REJECTED])
-        skipped = len([m for m in self.match_suggestions
-                      if m.status == MatchStatus.SKIPPED])
+        # Pending suggestions and their amounts
+        pending = [m for m in self.match_suggestions
+                  if m.status == MatchStatus.PENDING]
+        pending_amount = sum(m.bank_transaction.amount for m in pending)
+
+        rejected = [m for m in self.match_suggestions
+                   if m.status == MatchStatus.REJECTED]
+        rejected_amount = sum(m.bank_transaction.amount for m in rejected)
+
+        skipped = [m for m in self.match_suggestions
+                  if m.status == MatchStatus.SKIPPED]
+        skipped_amount = sum(m.bank_transaction.amount for m in skipped)
+
+        # Unmatched amounts
+        unmatched_bank_count = total_bank - confirmed_count
+        # Calculate unmatched bank amount from actual unmatched transactions
+        confirmed_bank_ids = {m.bank_transaction.id for m in self.confirmed_matches}
+        unmatched_bank_amount = sum(b.amount for b in self.bank_transactions
+                                    if b.id not in confirmed_bank_ids)
 
         return {
             'total_bank_transactions': total_bank,
             'total_beacon_entries': total_beacon,
-            'confirmed_matches': total_confirmed,
-            'auto_confirmed': confirmed_auto,
-            'manual_matches': manual_matches,
-            'manually_resolved': manually_resolved,
+            'confirmed_matches': confirmed_count,
+            'confirmed_amount': total_confirmed_amount,
+            'auto_confirmed': len(confirmed_auto),
+            'manual_matches': len(manual_matches),
+            'manually_resolved': len(manually_resolved),
             'matched_beacon_entries': matched_beacon,
-            'pending_suggestions': pending,
-            'rejected_suggestions': rejected,
-            'skipped_suggestions': skipped,
-            'unmatched_bank': total_bank - total_confirmed,
+            'pending_suggestions': len(pending),
+            'pending_amount': pending_amount,
+            'rejected_suggestions': len(rejected),
+            'rejected_amount': rejected_amount,
+            'skipped_suggestions': len(skipped),
+            'skipped_amount': skipped_amount,
+            'unmatched_bank': unmatched_bank_count,
+            'unmatched_bank_amount': unmatched_bank_amount,
             'unmatched_beacon': total_beacon - matched_beacon
         }
 
