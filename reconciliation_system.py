@@ -214,6 +214,28 @@ class ReconciliationSystem:
         self._load_member_lookup()
         self._load_state()
 
+    def _parse_bank_date(self, date_str: str) -> datetime:
+        """Parse bank date string, trying multiple formats.
+
+        Raises ValueError if no format matches.
+        """
+        formats = [
+            '%d-%b-%y',      # 17-Mar-25 (original format)
+            '%d %b %Y',      # 17 Mar 2025
+            '%d %b %y',      # 17 Mar 25
+            '%d-%b-%Y',      # 17-Mar-2025
+            '%d/%m/%Y',      # 17/03/2025
+            '%d/%m/%y',      # 17/03/25
+            '%Y-%m-%d',      # 2025-03-17
+        ]
+        date_str = date_str.strip()
+        for fmt in formats:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except ValueError:
+                continue
+        raise ValueError(f"Could not parse date: {date_str}")
+
     def _load_bank_transactions(self) -> List[BankTransaction]:
         """Load bank transactions from CSV."""
         transactions = []
@@ -225,8 +247,8 @@ class ReconciliationSystem:
             reader = csv.DictReader(f)
             for idx, row in enumerate(reader):
                 try:
-                    # Parse date in format DD-MMM-YY
-                    date = datetime.strptime(row['Date'].strip(), '%d-%b-%y')
+                    # Parse date using multi-format parser
+                    date = self._parse_bank_date(row['Date'])
                     amount = Decimal(row['Amount'].strip().replace(',', ''))
 
                     transaction = BankTransaction(

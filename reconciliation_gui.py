@@ -263,7 +263,7 @@ class ReconciliationGUI:
         # Search help text
         search_help = ttk.Label(
             search_row,
-            text='[name | "exact" | £amount | date | MATCH_/BANK_/BEACON_id]',
+            text='[name | "exact" | £amount | date | TR_transno | MATCH_/BANK_/BEACON_id]',
             foreground='#666666',
             font=('Segoe UI', 8)
         )
@@ -832,7 +832,10 @@ class ReconciliationGUI:
 
     def _should_skip_match(self, match):
         """Check if a match should be skipped based on current settings."""
-        if self.skip_confirmed_var.get() and match.status == MatchStatus.CONFIRMED:
+        # Treat MANUAL_MATCH and MANUALLY_RESOLVED as confirmed for skipping purposes
+        if self.skip_confirmed_var.get() and match.status in (
+            MatchStatus.CONFIRMED, MatchStatus.MANUAL_MATCH, MatchStatus.MANUALLY_RESOLVED
+        ):
             return True
         if self.skip_rejected_var.get() and match.status == MatchStatus.REJECTED:
             return True
@@ -1125,6 +1128,9 @@ class ReconciliationGUI:
             return ('bank_id', upper_term)
         if upper_term.startswith('BEACON_'):
             return ('beacon_id', upper_term)
+        if upper_term.startswith('TR_'):
+            # Trans_no search - remove prefix and search beacon trans_no
+            return ('trans_no', term[3:])  # Keep original case for trans_no
 
         # 3. Check for date
         parsed_date = self._parse_search_date(term)
@@ -1193,6 +1199,13 @@ class ReconciliationGUI:
                         self.search_matches.append(i)
                         break
 
+            elif search_type == 'trans_no':
+                # Trans_no search - exact match on beacon trans_no
+                for beacon in beacons:
+                    if beacon.trans_no == parsed_value:
+                        self.search_matches.append(i)
+                        break
+
             elif search_type == 'date':
                 # Date search - match bank date or any beacon date
                 if bank.date.date() == parsed_value.date():
@@ -1234,6 +1247,7 @@ class ReconciliationGUI:
                 'match_id': 'Match ID',
                 'bank_id': 'Bank ID',
                 'beacon_id': 'Beacon ID',
+                'trans_no': 'trans_no',
                 'date': 'date',
                 'amount': 'amount',
                 'name': 'name'
